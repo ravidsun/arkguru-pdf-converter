@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(& \"C:\\\\Users\\\\ravid\\\\IdeaProjects\\\\arkguru\\\\arkguru-pdf-extraction\\\\.venv\\\\Scripts\\\\python.exe\" -m pip show onnxruntime onnxruntime-gpu 2>&1)",
+      "PowerShell(& \"C:\\\\Users\\\\ravid\\\\IdeaProjects\\\\arkguru\\\\.venv\\\\Scripts\\\\python.exe\" -m pip show onnxruntime onnxruntime-gpu 2>&1)",
+      "PowerShell(& \"C:\\\\Users\\\\ravid\\\\IdeaProjects\\\\arkguru\\\\arkguru-pdf-extraction\\\\.venv\\\\Scripts\\\\python.exe\" -m pip uninstall onnxruntime onnxruntime-gpu -y)",
+      "PowerShell(& \"C:\\\\Users\\\\ravid\\\\IdeaProjects\\\\arkguru\\\\arkguru-pdf-extraction\\\\.venv\\\\Scripts\\\\python.exe\" -m pip install onnxruntime)"
+    ]
+  }
+}

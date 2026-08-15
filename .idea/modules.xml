@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="ProjectModuleManager">
+    <modules>
+      <module fileurl="file://$PROJECT_DIR$/.idea/arkguru.iml" filepath="$PROJECT_DIR$/.idea/arkguru.iml" />
+      <module fileurl="file://$PROJECT_DIR$/arkguru-pdf-extraction/arkguru-pdf-extraction.iml" filepath="$PROJECT_DIR$/arkguru-pdf-extraction/arkguru-pdf-extraction.iml" />
+      <module fileurl="file://$PROJECT_DIR$/arkguru-rag-slm/arkguru-rag-slm.iml" filepath="$PROJECT_DIR$/arkguru-rag-slm/arkguru-rag-slm.iml" />
+      <module fileurl="file://$PROJECT_DIR$/arkguru-web-scraping/arkguru-web-scraping.iml" filepath="$PROJECT_DIR$/arkguru-web-scraping/arkguru-web-scraping.iml" />
+    </modules>
+  </component>
+</project>
