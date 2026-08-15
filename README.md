@@ -1,0 +1,442 @@
+# arkguru — A 3-Phase Local RAG System
+
+**arkguru** is an end-to-end retrieval-augmented generation (RAG) pipeline that extracts knowledge from PDFs and websites, fine-tunes a small language model, and serves a fully local chat system — no external APIs at inference time.
+
+**Target hardware:** Asus NUC with Intel Core Ultra 9 185H, 96 GB RAM, GPU-optional  
+**CPU-only fine-tuning:** ✓ Yes, with Intel Extension for Transformers or ipex-llm  
+**GPU migration:** ✓ Yes, config + uncommented lines only  
+**Local inference:** ✓ Yes, via Ollama (llama.cpp)
+
+---
+
+## System architecture
+
+```
+┌─────────────────────┐
+│  PDFs on disk       │
+│  Websites (crawl)   │
+└──────────┬──────────┘
+           │
+      ┌────▼─────────────────────────────────┐
+      │  Phase 1: arkguru-pdf-extraction     │
+      │  + Phase 2: arkguru-web-scraping     │
+      │  → Common Chunk schema               │
+      └──────────┬──────────────────────────┘
+                 │
+      ┌──────────▼──────────────────────────┐
+      │  Phase 3: arkguru-rag-slm            │
+      │  - Combine + deduplicate             │
+      │  - Fine-tune small LM (LoRA)         │
+      │  - Index + retrieve (pgvector)       │
+      │  - Serve via Ollama                  │
+      └──────────┬──────────────────────────┘
+                 │
+         ┌───────▼────────┐
+         │  Local chat    │
+         │  Grounded QA   │
+         │  with citations│
+         └────────────────┘
+```
+
+---
+
+## Phase 1: PDF Extraction (`arkguru-pdf-extraction`)
+
+**Input:** Folder of PDFs (native, scanned, or mixed)  
+**Output:** Structured chunks (JSONL/Parquet) with metadata  
+**Speed:** ~5–50 MB/h (depends on OCR)
+
+**Key features:**
+- **Three extraction backends:** pymupdf4llm (default, fast), docling (complex tables), pymupdf (fallback)
+- **Scanned PDF OCR:** Detects image-only pages and OCRs them in-place; native text layers untouched
+- **Table extraction:** Preserves structure (rows, columns) as standalone markdown chunks
+- **Figure OCR:** Extracts text from diagrams/charts (axis labels, legends)
+- **Three chunking strategies:** structure (default), parent_child (long context), semantic (embedding-aware)
+
+**Example workflow:**
+```bash
+cd arkguru-pdf-extraction
+python scripts/make_sample_pdf.py     # create test PDF
+make phase1                           # extract & chunk
+# → data/processed/sample_handbook.jsonl
+```
+
+**Configuration highlights:**
+```yaml
+backend: "pymupdf4llm"    # fast native-text PDFs
+backend: "docling"        # complex tables (slower)
+strategy: "parent_child"  # retrieve small chunks, expand to parent for context
+target_tokens: 400        # ~300–500 tokens per chunk (tuned for retrieval)
+ocr_enabled: true         # safe on mixed documents
+extract_figures: true     # OCR text in images
+```
+
+**System dependencies (optional OCR):**
+```bash
+# macOS
+brew install tesseract ghostscript
+
+# Ubuntu/Debian
+sudo apt-get install tesseract-ocr ghostscript
+
+# Windows: Download from GitHub + Ghostscript website, add to PATH
+```
+
+---
+
+## Phase 2: Web Scraping (`arkguru-web-scraping`)
+
+**Input:** List of seed URLs  
+**Output:** Chunks from crawled pages (JSONL/Parquet, same schema as Phase 1)  
+**Speed:** ~200–500 ms/page (local backend), ~1–3 s/page (firecrawl)
+
+**Key features:**
+- **Two fetch backends:** local (trafilatura + httpx, free), firecrawl (JS-heavy sites, paid)
+- **Breadth-first crawl:** BFS frontier with link discovery up to max_pages
+- **Structure-aware chunking:** Same `pack_windows` logic as Phase 1 → identical chunk sizes
+- **Near-dedup:** MinHash LSH collapses syndicated/similar pages (Jaccard ≥ 0.9)
+
+**Example workflow:**
+```bash
+cd arkguru-web-scraping
+# Point at your docs site
+python -m phase2_web.pipeline --seeds https://your.site/docs --max-pages 200
+# → data/processed/web_chunks.jsonl
+```
+
+**Backend decision:**
+| Use | If |
+|---|---|
+| `local` | Static sites, traditional CMS (WordPress), internal wikis, documentation |
+| `firecrawl` | Single-page apps, JavaScript frameworks, React/Vue, dynamic content |
+
+**Configuration highlights:**
+```yaml
+seeds: ["https://docs.example.com"]
+max_pages: 200              # hard cap on crawl size
+same_domain_only: true      # prevent crawl explosion
+backend: "local"            # local | firecrawl
+target_tokens: 550          # slightly larger for web (more boilerplate)
+min_content_chars: 200      # skip nav-only pages
+```
+
+---
+
+## Phase 3: RAG + Fine-tuning (`arkguru-rag-slm`)
+
+**Input:** Combined chunks from Phase 1 + Phase 2, (optional) Postgres + pgvector  
+**Output:** Fine-tuned model + vector index, grounded answers via local LLM  
+**Speed:** Fine-tune 3–50h (CPU), Inference 5–20 tok/s (CPU), 100+ tok/s (GPU)
+
+### Quickstart (no database, minimal setup)
+
+Test the full pipeline locally in minutes:
+
+```bash
+cd arkguru-rag-slm
+pip install -r requirements.txt
+
+# One command: extract Phase 1 PDFs, ingest, then chat
+python -m phase3_rag.run_pdfs --pdfs /path/to/your_pdfs --embedder hashing \
+    --ask "your question here"
+
+# On production hardware (with local LLM), switch embedder + model:
+python -m phase3_rag.run_pdfs --pdfs /path/to/pdfs --embedder sentence_transformer \
+    --model domain-slm --chat
+```
+
+### Full production setup
+
+#### 1. Prepare data
+```bash
+# Copy outputs from Phase 1 and Phase 2 into this repo:
+#   data/processed/*.jsonl (from Phase 1, one per PDF)
+#   data/processed/web_chunks.jsonl (from Phase 2)
+
+# Combine, deduplicate, generate training pairs:
+make combine
+# → data/processed/train.jsonl, val.jsonl, corpus.jsonl
+```
+
+#### 2. Set up Postgres + pgvector (optional, for scale)
+
+For corpora >10K chunks or to share with Phase 1/2:
+
+```bash
+export PG_DSN=postgresql://user:pass@localhost:5432/rag
+
+# Create extension (run once):
+psql $PG_DSN -c "CREATE EXTENSION IF NOT EXISTS vector;"
+
+# Tables are auto-created by Phase 1, Phase 2, or Phase 3 on first run
+```
+
+See individual repo docs or [docs/DATABASE_SETUP.md](arkguru-pdf-extraction/docs/DATABASE_SETUP.md) for full setup.
+
+#### 3. Fine-tune (optional but recommended)
+
+```bash
+make finetune
+# → artifacts/lora-adapter/ (12–24h on NUC CPU, depends on dataset size + model)
+```
+
+Then merge, convert to GGUF, quantize to Q4_K_M, and register with Ollama:
+```bash
+# Commands in phase3_rag/serve.py header; produces `domain-slm` model tag
+```
+
+#### 4. Index for retrieval
+
+```bash
+# Option A: Index local files
+make index
+# → pgvector table with HNSW index + full-text index
+
+# Option B: Fill embeddings if using shared datastore (Phases 1/2 already wrote chunks)
+python -m phase3_rag.embed_datastore --embedder sentence_transformer \
+    --model BAAI/bge-m3 --dim 1024
+```
+
+#### 5. Chat locally
+
+```bash
+# Start Ollama (if not already running)
+ollama serve &
+
+make serve
+# you> What PPE is required before servicing a unit?
+# assistant> ... [sample_handbook.pdf p.1]
+```
+
+#### 6. Evaluate quality (RAGAS)
+
+```bash
+make eval
+# Reports context precision, recall, faithfulness, answer relevancy
+```
+
+### Key components
+
+| Module | Purpose | Input | Output |
+|---|---|---|---|
+| `prepare_dataset.py` | Combine + dedup chunks, generate training pairs | JSONL/Parquet from Phase 1/2 | train.jsonl, val.jsonl, corpus.jsonl |
+| `finetune_qlora.py` | Fine-tune small LM with LoRA (CPU or GPU) | train.jsonl | lora-adapter/ |
+| `embed_datastore.py` | Embed corpus + store in pgvector | corpus.jsonl | pgvector + HNSW index |
+| `index.py` | Standalone local indexing (no DB) | corpus.jsonl | data/store/index.{npz,jsonl} |
+| `retrieve.py` | Hybrid search (dense + BM25) + reranking | corpus/pgvector + query | top-k ranked chunks |
+| `serve.py` | Chat interface via Ollama | query + retrieval index | grounded answer + sources |
+| `eval_ragas.py` | Evaluate retrieval + generation quality | golden_qa.jsonl + system | RAGAS metrics |
+
+### Configuration
+
+**Main config:** `config/config.yaml`  
+**Database config:** `config/datastore.yaml` (DSN, table names, embedding dim)  
+**Golden eval set:** `phase3_rag/golden/golden_qa.jsonl` (50+ Q&A pairs)
+
+**Key tuning knobs:**
+
+```yaml
+base_model: "Qwen2.5-3B-Instruct"        # or Mistral-7B, Phi-3.5-mini
+lora:
+  rank: 16                               # balance: 8 (fast), 32 (expressive)
+  alpha: 32
+embedding_model: "BAAI/bge-m3"
+reranker_model: "BAAI/bge-reranker"
+retrieval:
+  top_k_vector: 20                       # dense search hits
+  top_k_bm25: 15                         # lexical search hits
+  top_k_final: 5                         # returned after rerank
+  use_cross_encoder_rerank: true         # re-score with reranker
+  use_parent_expansion: true             # swap child→parent for context
+```
+
+**Embedder choices:**
+- `hashing`: Offline testing (no downloads, deterministic, low quality)
+- `sentence_transformer`: Production (SOTA, ~100–300 queries/s CPU)
+
+---
+
+## Data flow and schema
+
+All three phases share a common **`Chunk` schema** (in `common/schema.py`):
+
+```python
+text: str                    # chunk body
+source_type: "pdf" | "web"   # origin
+source_id: str               # PDF filename or URL
+chunk_index: int             # sequence in source
+title: str                   # document title
+section: str                 # section heading
+page: int | None             # page number (PDFs)
+url: str | None              # full URL (web)
+domain: str | None           # domain (web)
+lang: str                    # detected language
+token_count: int             # chunk size
+overlap_tokens: int          # overlap with next chunk
+parent_id: str | None        # link to larger context (parent_child strategy)
+is_parent: bool              # true if this is a parent chunk
+embedding: list[float] | None # nullable; filled by Phase 3
+extra: dict                  # block_type: "table" | "figure" (Phase 1)
+chunk_id: str                # SHA256(source + index + role); idempotent
+```
+
+**Why one schema?**
+- Phases 1 and 2 outputs concatenate with zero conversion
+- One database table for all sources
+- Re-embedding is just truncating one column (vectors are disposable)
+
+**Idempotency:**
+All outputs are keyed by `chunk_id`, so re-running is safe:
+- Same inputs → same `chunk_id`
+- Upserts don't create duplicates
+- Adding new PDFs only appends new chunks
+
+---
+
+## Hardware & performance
+
+### Tested on: Intel Core i7 (16 GB RAM, 8 cores)
+
+| Task | Time | Throughput | Bottleneck |
+|---|---|---|---|
+| Phase 1: Native PDF (10 MB) | 2–3 s | ~3–5 MB/s | Parsing |
+| Phase 1: Scanned PDF (5 MB) | 30–60 s | ~0.1 MB/s | OCR |
+| Phase 2: Static site (100 pages) | 20–50 s | ~2–5 pages/s | Network + parsing |
+| Phase 3: Fine-tune 3B model (5K pairs) | 12–24 h | ~400–600 pairs/h | Compute (CPU) |
+| Phase 3: Inference (per token) | ~50–200 ms | 5–20 tok/s | Memory + compute (CPU) |
+
+### Scaling on GPU (future)
+Fine-tuning: ~1–2 h (with `bitsandbytes` + GTX 1080)  
+Inference: 50–100+ tok/s (with vLLM + RTX 3090)
+
+---
+
+## Deployment paths
+
+### Path A: Local files (development / small corpus)
+
+```
+Phase 1 PDFs → .jsonl files → Phase 3 (local index)
+Phase 2 URLs → .jsonl files ↗
+                          ↓
+                   data/store/*.jsonl
+                   (vector index in memory/disk)
+```
+
+**Pros:** Simple, offline, no database setup  
+**Cons:** Single-machine only, limited to ~100K chunks (memory-bound)  
+**Best for:** Prototyping, <1GB corpus
+
+### Path B: Postgres + pgvector (production / large corpus)
+
+```
+Phase 1 PDFs → Postgres (chunks table)
+Phase 2 URLs ↗
+       ↓
+Phase 3 fills embeddings (chunk_embeddings table)
+       ↓
+Retrieval queries both tables (joined on chunk_id)
+       ↓
+Serve via Ollama (local LLM)
+```
+
+**Pros:** Scales to millions of chunks, transactional, shareable  
+**Cons:** Database setup, network latency (usually <10 ms)  
+**Best for:** Production, >1 million chunks, team sharing
+
+### Path C: Hybrid (start file-based, migrate to DB)
+
+1. Develop locally with files (Path A)
+2. Once satisfied, spin up Postgres + pgvector (Path B)
+3. Phase 1/2 re-run with `--sink postgres` → upsert to DB
+4. Phase 3 switches config to read from DB
+5. Queries scale, no reprocessing of PDFs/web
+
+---
+
+## Troubleshooting by phase
+
+### Phase 1 (PDFs)
+
+| Issue | Cause | Fix |
+|---|---|---|
+| Empty output | Scanned PDF | Enable OCR: `ocr_enabled: true` |
+| Garbled tables | Simple grid extraction | Switch backend: `backend: docling` |
+| Missing image text | Figures not OCR'd | Enable: `extract_figures: true` |
+| Chunks too big/small | Tokenizer miscalibrated | Tune `target_tokens`, `overlap_pct`, `min_tokens` |
+| Out of memory | Huge PDF + single worker | Reduce `workers` or split input folder |
+
+### Phase 2 (Web)
+
+| Issue | Cause | Fix |
+|---|---|---|
+| Blank content | JavaScript-rendered site | Switch backend: `backend: firecrawl` |
+| Crawl wandered off-site | `same_domain_only: false` | Set to `true` or limit `max_pages` |
+| Slow crawl | Rate-limited by site | Reduce `max_pages` or add delays in `fetch.py` |
+| Duplicate content | Syndicated pages + pagination | Ensure `datasketch` installed for MinHash dedup |
+
+### Phase 3 (RAG)
+
+| Issue | Cause | Fix |
+|---|---|---|
+| Can't connect to Postgres | DSN wrong or DB down | Check `PG_DSN` env var and test connection |
+| Can't connect to Ollama | Ollama not running | Start: `ollama serve` |
+| Slow inference (CPU) | Normal on CPU | Add GPU, use smaller model (Phi-3, MiniChat), or use vLLM |
+| Poor answer quality | Bad chunks or retrieval | Inspect retrieved chunks: `python -m phase3_rag.retrieve "question" --verbose` |
+| Fine-tune OOM | Model + data too large | Reduce `lora.rank`, `batch_size`, or `max_samples` |
+| Re-embed with new model | Need to test other embeddings | Truncate `chunk_embeddings` table, re-run `embed_datastore` |
+
+---
+
+## Contributing
+
+Each phase is a self-contained repo:
+- [`arkguru-pdf-extraction`](https://github.com/ravidsun/arkguru-pdf-extraction) — PDF → Chunks
+- [`arkguru-web-scraping`](https://github.com/ravidsun/arkguru-web-scraping) — URLs → Chunks
+- [`arkguru-rag-slm`](https://github.com/ravidsun/arkguru-rag-slm) — Chunks → Fine-tune + RAG
+
+Contributions welcome. See individual repos for issue tracking and pull requests.
+
+---
+
+## License
+
+MIT (each repo independently licensed)
+
+---
+
+## FAQ
+
+**Q: Do I need Postgres?**  
+A: No. Start with local files (`data/store/*.jsonl`). Postgres is optional for scale (>100K chunks) and team sharing.
+
+**Q: Can I use a different LLM?**  
+A: Yes. Phase 3 defaults to `Qwen2.5-3B-Instruct`, but supports any GGUF in Ollama (Mistral, Llama, Phi, etc.). Swap `base_model` in config and re-fine-tune.
+
+**Q: Can I add a GPU later?**  
+A: Yes. CPU fine-tuning code is isolated in `finetune_qlora.py`; swap one backend (Intel Extension → bitsandbytes) and uncomment GPU lines. Inference via Ollama already GPU-capable.
+
+**Q: How do I update my corpus?**  
+A: Re-run Phase 1/2 on new PDFs/URLs. Phase 3 upserts by `chunk_id`, so only new chunks are added. No re-fine-tuning needed (training data is static); just re-run Phase 3 retrieval/index if adding embeddings.
+
+**Q: Can I use this for non-English?**  
+A: Yes. Chunk schema includes `lang` field. Phase 1/2 auto-detect language. Phase 3 fine-tuning is language-agnostic (LoRA adapts any base model). Embedder (`bge-m3`) supports 100+ languages.
+
+**Q: What's the difference between `parent_child` and `semantic` chunking?**  
+A: 
+- `parent_child`: Each section gets a large "parent" chunk (full context) plus small "child" chunks (precise retrieval). Retrieval returns children, can expand to parent.
+- `semantic`: Splits where sentence-to-sentence embedding similarity drops (embedding-aware). Better for dense, technical prose; requires embedder at chunk time.
+
+Start with `structure` (default). Use `parent_child` if retrieval too narrow; use `semantic` if you want embedding-aware splitting.
+
+**Q: How do I evaluate my system?**  
+A: Phase 3 includes `eval_ragas.py`, which computes context precision/recall/faithfulness over a golden Q&A set. Bootstrap with 50–100 expert-curated pairs, then run before/after fine-tuning to measure improvement.
+
+---
+
+## Quick links
+
+- [Phase 1 README](arkguru-pdf-extraction/README.md) — detailed extraction, OCR, chunking strategies
+- [Phase 2 README](arkguru-web-scraping/README.md) — crawl, extract, near-dedup logic
+- [Phase 3 README](arkguru-rag-slm/README.md) — fine-tuning, retrieval, serving, evaluation
+- [Database Setup](arkguru-pdf-extraction/docs/DATABASE_SETUP.md) — Postgres + pgvector on local/remote
