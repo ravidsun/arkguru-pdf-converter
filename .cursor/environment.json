@@ -1,0 +1,9 @@
+{
+  "name": "arkguru RAG dev",
+  "install": "bash scripts/setup_dev_env.sh",
+  "repositoryDependencies": [
+    "https://github.com/ravidsun/arkguru-pdf-extraction",
+    "https://github.com/ravidsun/arkguru-web-scraping",
+    "https://github.com/ravidsun/arkguru-rag-slm"
+  ]
+}

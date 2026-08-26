@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "arkguru-common"
+version = "1.0.0"
+description = "Shared Chunk schema, tokenizer, chunking, datastore, and worker primitives for the arkguru 3-phase RAG system."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "ravidsun" }]
+dependencies = [
+    "pyyaml>=6.0",
+    "tiktoken>=0.7",
+]
+
+[project.optional-dependencies]
+# Parquet interchange (schema.write_parquet / read_parquet)
+parquet = ["pyarrow>=16.0"]
+# Postgres + pgvector datastore backend (common.datastore ChunkStore)
+postgres = ["psycopg[binary]>=3.2", "pgvector>=0.3"]
+# Test tooling used by `make test` in the phase repos
+test = ["pytest>=7.0"]
+
+[tool.setuptools]
+packages = ["common"]
