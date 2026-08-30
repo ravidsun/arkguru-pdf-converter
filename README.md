@@ -7,6 +7,11 @@
 **GPU migration:** ✓ Yes, config + uncommented lines only  
 **Local inference:** ✓ Yes, via Ollama (llama.cpp)
 
+**How to run:**
+
+- [docs/LOCAL_RUN.md](docs/LOCAL_RUN.md) — laptop / NUC / workstation (venv, file sink, optional Postgres + Ollama)
+- [docs/CLOUD_RUN.md](docs/CLOUD_RUN.md) — Cursor Cloud Agent (`.cursor/environment.json` + `scripts/setup_dev_env.sh`)
+
 ---
 
 ## System architecture
@@ -436,6 +441,8 @@ A: Phase 3 includes `eval_ragas.py`, which computes context precision/recall/fai
 
 ## Quick links
 
+- [Local run](docs/LOCAL_RUN.md) — clone layout, venv, smoke test, production-style local stack
+- [Cloud run](docs/CLOUD_RUN.md) — Cursor Cloud Agent install, layout, constraints
 - [Phase 1 README](arkguru-pdf-extraction/README.md) — detailed extraction, OCR, chunking strategies
 - [Phase 2 README](arkguru-web-scraping/README.md) — crawl, extract, near-dedup logic
 - [Phase 3 README](arkguru-rag-slm/README.md) — fine-tuning, retrieval, serving, evaluation
