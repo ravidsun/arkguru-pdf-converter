@@ -154,9 +154,9 @@ class ChunkStore:
         placeholders = ",".join(["%s"] * (len(_COLS) + 1))
         collist = ",".join(_COLS + ["meta"])
         updates = ",".join(f"{k}=EXCLUDED.{k}" for k in _COLS if k != "chunk_id")
+        # Leave created_at on conflict so re-ingests do not advance the backup watermark.
         sql = (f"INSERT INTO {self.chunks} ({collist}) VALUES ({placeholders}) "
-               f"ON CONFLICT (chunk_id) DO UPDATE SET {updates}, "
-               f"meta=EXCLUDED.meta, created_at = now()")
+               f"ON CONFLICT (chunk_id) DO UPDATE SET {updates}, meta=EXCLUDED.meta")
         with self._connect() as conn, conn.cursor() as cur:
             cur.executemany(sql, rows)
             conn.commit()
@@ -165,17 +165,24 @@ class ChunkStore:
     # -- embeddings (Phase 3) ---------------------------------------------
     def iter_missing_embeddings(self, batch: int = 256
                                 ) -> Iterator[list[tuple[str, str]]]:
-        """Yield (chunk_id, text) for chunks that have no row in the vectors table."""
-        with self._connect() as conn, conn.cursor() as cur:
+        """Yield (chunk_id, text) for chunks that have no row in the vectors table.
+
+        Uses a server-side cursor so the client does not buffer the full result set.
+        """
+        with self._connect() as conn, conn.cursor(name="missing") as cur:
+            cur.itersize = batch
             cur.execute(
                 f"SELECT c.chunk_id, c.text FROM {self.chunks} c "
                 f"LEFT JOIN {self.vectors} v ON c.chunk_id = v.chunk_id "
                 f"WHERE v.chunk_id IS NULL AND c.is_parent = false")
-            while True:
-                rows = cur.fetchmany(batch)
-                if not rows:
-                    break
-                yield [(row[0], row[1]) for row in rows]
+            buf: list[tuple[str, str]] = []
+            for row in cur:
+                buf.append((row[0], row[1]))
+                if len(buf) >= batch:
+                    yield buf
+                    buf = []
+            if buf:
+                yield buf
 
     def update_embeddings(self, ids: list[str], vectors, model: Optional[str] = None) -> int:
         """Upsert embeddings into the vectors table (keyed by chunk_id)."""
