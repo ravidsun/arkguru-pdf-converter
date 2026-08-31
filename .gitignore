@@ -10,3 +10,9 @@ artifacts/
 *.gguf
 *.parquet
 .env
+
+# Nested sibling clones — each is its own git repo
+arkguru-common/
+arkguru-pdf-extraction/
+arkguru-web-scraping/
+arkguru-rag-slm/
