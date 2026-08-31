@@ -152,15 +152,16 @@ python -m phase2_web.pipeline --config config/config.yaml --sink postgres
 
 4. Fine-tune (optional, CPU hours), merge/quantize, register with Ollama as `domain-slm` (see the header of `phase3_rag/serve.py`).
 
-5. Index and chat:
+5. Embed (if chunks are already in Postgres) and chat:
 
 ```bash
 cd ../arkguru-rag-slm
-make index
+python -m phase3_rag.embed_datastore --embedder sentence_transformer \
+    --model BAAI/bge-m3 --dim 1024
+# or, from a combined JSONL: make index   # Postgres, not data/store/*.npz
 ollama serve &
-python -m phase3_rag.run_pdfs --pdfs ../arkguru-pdf-extraction/data/raw_pdfs \
-  --embedder sentence_transformer --model domain-slm --chat
-# or: make serve
+python -m phase3_rag.serve
+# file-mode alternative (no DSN): python -m phase3_rag.run_pdfs --pdfs ... --embedder hashing --chat
 ```
 
 ## Useful make targets
@@ -173,6 +174,8 @@ python -m phase3_rag.run_pdfs --pdfs ../arkguru-pdf-extraction/data/raw_pdfs \
 | `arkguru-rag-slm` | `make from-pdfs PDFS=... ASK="..."` | PDF → ingest → ask |
 | `arkguru-rag-slm` | `make e2e` | Offline orchestrator pass |
 | `arkguru-rag-slm` | `make serve` | Interactive RAG chat |
+| `arkguru-rag-slm` | `make backup` | Dump `chunks` + embeddings if watermark moved |
+| `arkguru-rag-slm` | `make index` | JSONL → **Postgres** chunks + embeddings |
 
 ## Troubleshooting
 

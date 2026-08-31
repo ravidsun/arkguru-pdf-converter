@@ -48,22 +48,23 @@
 ## Phase 1: PDF Extraction (`arkguru-pdf-extraction`)
 
 **Input:** Folder of PDFs (native, scanned, or mixed)  
-**Output:** Structured chunks (JSONL/Parquet) with metadata  
-**Speed:** ~5–50 MB/h (depends on OCR)
+**Output:** Per-PDF folders of JSONL (or Parquet) under `data/processed/{stem}/`  
+**Speed:** native ~3–5 MB/s; scanned ~0.1 MB/s (OCR). See [Hardware](#hardware--performance).
 
 **Key features:**
 - **Three extraction backends:** pymupdf4llm (default, fast), docling (complex tables), pymupdf (fallback)
 - **Scanned PDF OCR:** Detects image-only pages and OCRs them in-place; native text layers untouched
 - **Table extraction:** Preserves structure (rows, columns) as standalone markdown chunks
 - **Figure OCR:** Extracts text from diagrams/charts (axis labels, legends)
-- **Three chunking strategies:** structure (default), parent_child (long context), semantic (embedding-aware)
+- **Three chunking strategies:** `structure` (default, heading windows), `parent_child` (long parent + small children). `semantic` is a CLI/config value but Phase 1 does not pass an embedder, so it uses the same windows as `structure`.
 
 **Example workflow:**
 ```bash
 cd arkguru-pdf-extraction
 python scripts/make_sample_pdf.py     # create test PDF
 make phase1                           # extract & chunk
-# → data/processed/sample_handbook.jsonl
+# → data/processed/sample_handbook/chunks.jsonl
+#    (+ parents.jsonl / tables.jsonl / figures.jsonl when non-empty)
 ```
 
 **Configuration highlights:**
@@ -154,9 +155,9 @@ python -m phase3_rag.run_pdfs --pdfs /path/to/pdfs --embedder sentence_transform
 
 #### 1. Prepare data
 ```bash
-# Copy outputs from Phase 1 and Phase 2 into this repo:
-#   data/processed/*.jsonl (from Phase 1, one per PDF)
-#   data/processed/web_chunks.jsonl (from Phase 2)
+# Copy Phase 1 per-PDF folders (or concatenated jsonl) and Phase 2 web_chunks.jsonl:
+#   data/processed/<stem>/chunks.jsonl
+#   data/processed/web_chunks.jsonl
 
 # Combine, deduplicate, generate training pairs:
 make combine
@@ -193,13 +194,13 @@ Then merge, convert to GGUF, quantize to Q4_K_M, and register with Ollama:
 #### 4. Index for retrieval
 
 ```bash
-# Option A: Index local files
-make index
-# → pgvector table with HNSW index + full-text index
-
-# Option B: Fill embeddings if using shared datastore (Phases 1/2 already wrote chunks)
+# Option A: chunks already in Postgres (Phase 1 --sink postgres)
 python -m phase3_rag.embed_datastore --embedder sentence_transformer \
     --model BAAI/bge-m3 --dim 1024
+
+# Option B: JSONL corpus → Postgres chunks + embeddings
+make index
+# → python -m phase3_rag.index (not the local .npz store)
 ```
 
 #### 5. Chat locally
@@ -226,10 +227,12 @@ make eval
 |---|---|---|---|
 | `prepare_dataset.py` | Combine + dedup chunks, generate training pairs | JSONL/Parquet from Phase 1/2 | train.jsonl, val.jsonl, corpus.jsonl |
 | `finetune_qlora.py` | Fine-tune small LM with LoRA (CPU or GPU) | train.jsonl | lora-adapter/ |
-| `embed_datastore.py` | Embed corpus + store in pgvector | corpus.jsonl | pgvector + HNSW index |
-| `index.py` | Standalone local indexing (no DB) | corpus.jsonl | data/store/index.{npz,jsonl} |
+| `embed_datastore.py` | Embed chunks already in Postgres | `chunks` missing vectors | `chunk_embeddings` + HNSW |
+| `index.py` | Upsert a JSONL corpus **into Postgres**, then embed | corpus.jsonl + `PG_DSN` | `chunks` + `chunk_embeddings` |
+| `vector_store.py` / `run_pdfs` | Local incremental index (no DB) | Phase 1 JSONL | `data/store/index.{npz,jsonl}` |
 | `retrieve.py` | Hybrid search (dense + BM25) + reranking | corpus/pgvector + query | top-k ranked chunks |
-| `serve.py` | Chat interface via Ollama | query + retrieval index | grounded answer + sources |
+| `serve.py` | Chat via Ollama, or extractive fallback + faithfulness gate | query + index | grounded answer + sources |
+| `backup.py` | `pg_dump` of both tables when `created_at` watermark moved | Postgres | `data/backups/*.dump` |
 | `eval_ragas.py` | Evaluate retrieval + generation quality | golden_qa.jsonl + system | RAGAS metrics |
 
 ### Configuration
@@ -241,18 +244,21 @@ make eval
 **Key tuning knobs:**
 
 ```yaml
-base_model: "Qwen2.5-3B-Instruct"        # or Mistral-7B, Phi-3.5-mini
+base_model: "Qwen/Qwen2.5-3B-Instruct"
 lora:
-  rank: 16                               # balance: 8 (fast), 32 (expressive)
+  rank: 16
   alpha: 32
 embedding_model: "BAAI/bge-m3"
-reranker_model: "BAAI/bge-reranker"
+reranker_model: "BAAI/bge-reranker-base"
 retrieval:
-  top_k_vector: 20                       # dense search hits
-  top_k_bm25: 15                         # lexical search hits
-  top_k_final: 5                         # returned after rerank
-  use_cross_encoder_rerank: true         # re-score with reranker
-  use_parent_expansion: true             # swap child→parent for context
+  top_k_vector: 20
+  top_k_bm25: 20
+  top_k_final: 6
+  use_parent_expansion: true
+serve:
+  faithfulness:
+    enabled: true
+    min_token_overlap: 0.4
 ```
 
 **Embedder choices:**
@@ -287,14 +293,14 @@ chunk_id: str                # SHA256(source + index + role); idempotent
 
 **Why one schema?**
 - Phases 1 and 2 outputs concatenate with zero conversion
-- One database table for all sources
-- Re-embedding is just truncating one column (vectors are disposable)
+- One `chunks` table for all sources; vectors live in `chunk_embeddings`
+- Re-embedding is truncating/refilling the embeddings table (vectors are disposable)
 
 **Idempotency:**
 All outputs are keyed by `chunk_id`, so re-running is safe:
 - Same inputs → same `chunk_id`
-- Upserts don't create duplicates
-- Adding new PDFs only appends new chunks
+- Upserts update text/metadata and **do not** reset `created_at` (backup watermark stays put)
+- Adding new PDFs only appends new chunks; Phase 3 embeds rows still missing vectors
 
 ---
 
@@ -309,6 +315,8 @@ All outputs are keyed by `chunk_id`, so re-running is safe:
 | Phase 2: Static site (100 pages) | 20–50 s | ~2–5 pages/s | Network + parsing |
 | Phase 3: Fine-tune 3B model (5K pairs) | 12–24 h | ~400–600 pairs/h | Compute (CPU) |
 | Phase 3: Inference (per token) | ~50–200 ms | 5–20 tok/s | Memory + compute (CPU) |
+| 32 native-text PDFs, hashing embed (Cursor Cloud Agent) | ~15–45 min | — | Phase 1 + CPU, no GPU |
+| 32 native-text PDFs, CPU `bge-m3` (after model cached) | ~1–2.5 h | — | Embed dominates |
 
 ### Scaling on GPU (future)
 Fine-tuning: ~1–2 h (with `bitsandbytes` + GTX 1080)  
@@ -384,12 +392,13 @@ Serve via Ollama (local LLM)
 
 | Issue | Cause | Fix |
 |---|---|---|
-| Can't connect to Postgres | DSN wrong or DB down | Check `PG_DSN` env var and test connection |
-| Can't connect to Ollama | Ollama not running | Start: `ollama serve` |
+| Can't connect to Postgres | DSN wrong or DB down | Check `PG_DSN`; retrieve **raises** if DSN is set but connect fails |
+| Can't connect to Ollama | Ollama not running | Start: `ollama serve` (extractive answer still works) |
+| Generated answer refused | Faithfulness gate | Check retrieved context; gate retries once then refuses ungrounded text |
 | Slow inference (CPU) | Normal on CPU | Add GPU, use smaller model (Phi-3, MiniChat), or use vLLM |
-| Poor answer quality | Bad chunks or retrieval | Inspect retrieved chunks: `python -m phase3_rag.retrieve "question" --verbose` |
+| Poor answer quality | Bad chunks or retrieval | Inspect: `python -m phase3_rag.retrieve "question"` |
 | Fine-tune OOM | Model + data too large | Reduce `lora.rank`, `batch_size`, or `max_samples` |
-| Re-embed with new model | Need to test other embeddings | Truncate `chunk_embeddings` table, re-run `embed_datastore` |
+| Re-embed with new model | Need to test other embeddings | Truncate `chunk_embeddings`, re-run `embed_datastore` |
 
 ---
 
@@ -422,17 +431,17 @@ A: Yes. Phase 3 defaults to `Qwen2.5-3B-Instruct`, but supports any GGUF in Olla
 A: Yes. CPU fine-tuning code is isolated in `finetune_qlora.py`; swap one backend (Intel Extension → bitsandbytes) and uncomment GPU lines. Inference via Ollama already GPU-capable.
 
 **Q: How do I update my corpus?**  
-A: Re-run Phase 1/2 on new PDFs/URLs. Phase 3 upserts by `chunk_id`, so only new chunks are added. No re-fine-tuning needed (training data is static); just re-run Phase 3 retrieval/index if adding embeddings.
+A: Re-run Phase 1/2 on new PDFs/URLs. Upserts key by `chunk_id` and do not bump `created_at`. Phase 3 embeds only rows still missing from `chunk_embeddings`. No re-fine-tune required to retrieve the new PDFs.
 
 **Q: Can I use this for non-English?**  
 A: Yes. Chunk schema includes `lang` field. Phase 1/2 auto-detect language. Phase 3 fine-tuning is language-agnostic (LoRA adapts any base model). Embedder (`bge-m3`) supports 100+ languages.
 
 **Q: What's the difference between `parent_child` and `semantic` chunking?**  
 A: 
-- `parent_child`: Each section gets a large "parent" chunk (full context) plus small "child" chunks (precise retrieval). Retrieval returns children, can expand to parent.
-- `semantic`: Splits where sentence-to-sentence embedding similarity drops (embedding-aware). Better for dense, technical prose; requires embedder at chunk time.
+- `parent_child`: Each section gets a large parent chunk plus small children. Retrieval hits children; serve can expand to the parent.
+- `semantic`: *Intended* to split where adjacent-sentence similarity drops. **Not wired in Phase 1 today** (`pipeline` never passes `semantic_embedder`), so choosing `semantic` behaves like packed sentence windows.
 
-Start with `structure` (default). Use `parent_child` if retrieval too narrow; use `semantic` if you want embedding-aware splitting.
+Start with `structure` (Phase 1 config default). `run_pdfs` defaults to `parent_child`.
 
 **Q: How do I evaluate my system?**  
 A: Phase 3 includes `eval_ragas.py`, which computes context precision/recall/faithfulness over a golden Q&A set. Bootstrap with 50–100 expert-curated pairs, then run before/after fine-tuning to measure improvement.
