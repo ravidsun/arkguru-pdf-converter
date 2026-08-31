@@ -42,6 +42,19 @@ _COLS = ["chunk_id", "text", "source_type", "source_id", "chunk_index",
 _HIT_COLS = ["chunk_id", "text", "section", "source_id", "page", "url", "parent_id"]
 
 
+def _ensure_vector_extension(cur) -> None:
+    """Install pgvector in schema ``extensions`` when that schema exists.
+
+    Hosted Supabase puts the extension there. Local Docker / native installs
+    often have no ``extensions`` schema; fall back to the default search_path.
+    """
+    cur.execute("SELECT 1 FROM pg_namespace WHERE nspname = %s", ("extensions",))
+    if cur.fetchone():
+        cur.execute("CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA extensions;")
+    else:
+        cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
+
+
 class ChunkStore:
     def __init__(self, dsn: Optional[str] = None, table: str = "chunks",
                  vectors_table: str = "chunk_embeddings", dim: int = 1024,
@@ -59,7 +72,7 @@ class ChunkStore:
     def _connect(self):
         import psycopg
         from pgvector.psycopg import register_vector
-        conn = psycopg.connect(self.dsn)
+        conn = psycopg.connect(self.dsn, connect_timeout=15)
         try:
             register_vector(conn)
         except Exception:
@@ -79,7 +92,7 @@ class ChunkStore:
                 "config/datastore.yaml (see docs/DATABASE_SETUP.md). "
                 f"Underlying error: {e}") from e
         with conn, conn.cursor() as cur:
-            cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
+            _ensure_vector_extension(cur)
             pre = {}
             for t in (self.chunks, self.vectors):
                 cur.execute("SELECT to_regclass(%s)", (t,))
@@ -109,6 +122,9 @@ class ChunkStore:
                 );""")
             cur.execute(f"CREATE INDEX IF NOT EXISTS {self.chunks}_ts_idx "
                         f"ON {self.chunks} USING gin(ts);")
+            cur.execute(
+                f"CREATE INDEX IF NOT EXISTS {self.chunks}_source_idx "
+                f"ON {self.chunks} (source_type, source_id);")
             # 2) vectors = embeddings only, keyed to chunks
             cur.execute(f"""
                 CREATE TABLE IF NOT EXISTS {self.vectors} (
@@ -139,7 +155,8 @@ class ChunkStore:
         collist = ",".join(_COLS + ["meta"])
         updates = ",".join(f"{k}=EXCLUDED.{k}" for k in _COLS if k != "chunk_id")
         sql = (f"INSERT INTO {self.chunks} ({collist}) VALUES ({placeholders}) "
-               f"ON CONFLICT (chunk_id) DO UPDATE SET {updates}, meta=EXCLUDED.meta")
+               f"ON CONFLICT (chunk_id) DO UPDATE SET {updates}, "
+               f"meta=EXCLUDED.meta, created_at = now()")
         with self._connect() as conn, conn.cursor() as cur:
             cur.executemany(sql, rows)
             conn.commit()
@@ -149,19 +166,16 @@ class ChunkStore:
     def iter_missing_embeddings(self, batch: int = 256
                                 ) -> Iterator[list[tuple[str, str]]]:
         """Yield (chunk_id, text) for chunks that have no row in the vectors table."""
-        with self._connect() as conn, conn.cursor(name="missing") as cur:
-            cur.itersize = batch
+        with self._connect() as conn, conn.cursor() as cur:
             cur.execute(
                 f"SELECT c.chunk_id, c.text FROM {self.chunks} c "
                 f"LEFT JOIN {self.vectors} v ON c.chunk_id = v.chunk_id "
                 f"WHERE v.chunk_id IS NULL AND c.is_parent = false")
-            buf = []
-            for row in cur:
-                buf.append((row[0], row[1]))
-                if len(buf) >= batch:
-                    yield buf; buf = []
-            if buf:
-                yield buf
+            while True:
+                rows = cur.fetchmany(batch)
+                if not rows:
+                    break
+                yield [(row[0], row[1]) for row in rows]
 
     def update_embeddings(self, ids: list[str], vectors, model: Optional[str] = None) -> int:
         """Upsert embeddings into the vectors table (keyed by chunk_id)."""
@@ -192,6 +206,53 @@ class ChunkStore:
         with self._connect() as conn, conn.cursor() as cur:
             cur.execute(f"SELECT count(*) FROM {self.vectors}")
             return cur.fetchone()[0]
+
+    def fetch_by_ids(self, ids: list[str]) -> dict[str, dict]:
+        """Return ``chunk_id -> {text, section, source_id, page, url}`` for the given ids."""
+        if not ids:
+            return {}
+        cols = ["chunk_id", "text", "section", "source_id", "page", "url"]
+        with self._connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                f"SELECT {','.join(cols)} FROM {self.chunks} "
+                f"WHERE chunk_id = ANY(%s)", (list(ids),))
+            out: dict[str, dict] = {}
+            for row in cur.fetchall():
+                out[row[0]] = {
+                    "text": row[1] or "",
+                    "section": row[2] or "",
+                    "source_id": row[3] or "",
+                    "page": row[4],
+                    "url": row[5] or "",
+                }
+            return out
+
+    def created_at_watermark(self) -> str:
+        """Greatest ``created_at`` across chunks and embeddings, as text."""
+        with self._connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                f"SELECT greatest("
+                f"  coalesce((SELECT max(created_at) FROM {self.chunks}), "
+                f"           '-infinity'::timestamptz),"
+                f"  coalesce((SELECT max(created_at) FROM {self.vectors}), "
+                f"           '-infinity'::timestamptz)"
+                f")::text")
+            row = cur.fetchone()
+            return row[0] if row and row[0] is not None else "-infinity"
+
+    def list_pdf_sources(self) -> list[tuple[str, int, int]]:
+        """Per PDF ``source_id``: (source_id, child chunk count, embedded count)."""
+        with self._connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                f"SELECT c.source_id, "
+                f"       count(*) FILTER (WHERE c.is_parent = false) AS chunks, "
+                f"       count(v.chunk_id) AS embedded "
+                f"FROM {self.chunks} c "
+                f"LEFT JOIN {self.vectors} v ON v.chunk_id = c.chunk_id "
+                f"WHERE c.source_type = 'pdf' "
+                f"GROUP BY c.source_id "
+                f"ORDER BY c.source_id")
+            return [(r[0] or "", int(r[1]), int(r[2])) for r in cur.fetchall()]
 
     def read_all(self, include_parents: bool = True) -> list[Chunk]:
         q = f"SELECT {','.join(_COLS)}, meta FROM {self.chunks}"
