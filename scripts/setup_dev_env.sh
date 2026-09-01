@@ -2,32 +2,30 @@
 #
 # Set up the arkguru development environment.
 #
-# The three phase repos (arkguru-pdf-extraction, arkguru-web-scraping,
-# arkguru-rag-slm) all import the shared `common` package, which is provided by
-# `arkguru-common`. That package used to be a separate (never-published) repo;
-# its source now lives here, vendored under ./arkguru-common, and is installed
-# into the virtualenv so `import common` works everywhere without depending on a
-# fragile `../arkguru-common` sibling checkout.
+# Phase repos (arkguru-pdf-extraction, optional arkguru-web-scraping,
+# arkguru-rag-slm) import the shared `common` package from arkguru-common.
+# Prefer a sibling checkout of arkguru-common when present (first-class GitHub
+# repo); fall back to the copy vendored under ./arkguru-common.
 #
 # This script is idempotent and safe to re-run.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PARENT_DIR="$(dirname "$REPO_ROOT")"
-COMMON_DIR="$REPO_ROOT/arkguru-common"
 VENV_DIR="${ARKGURU_VENV:-$REPO_ROOT/.venv}"
 
 PHASES=(arkguru-pdf-extraction arkguru-web-scraping arkguru-rag-slm)
 
 log() { printf '\n\033[1;34m[setup]\033[0m %s\n' "$*"; }
 
-# --- Locate each phase repo -------------------------------------------------
-# On this platform the repos are checked out as flat siblings of this repo, but
-# the project can also be laid out with them nested underneath it. Support both.
-find_phase() {
+# --- Locate sibling or nested checkouts ------------------------------------
+# Cloud Agents check out repos as flat siblings; local clones may nest them
+# under this umbrella repo. Support both.
+find_checkout() {
   local name="$1"
+  local marker="$2"
   for candidate in "$PARENT_DIR/$name" "$REPO_ROOT/$name"; do
-    if [ -f "$candidate/requirements.txt" ]; then
+    if [ -f "$candidate/$marker" ]; then
       echo "$candidate"
       return 0
     fi
@@ -35,9 +33,32 @@ find_phase() {
   return 1
 }
 
+find_phase() { find_checkout "$1" "requirements.txt"; }
+
+find_common() { find_checkout "arkguru-common" "pyproject.toml"; }
+
+ensure_venv_packages() {
+  if python3 -c "import venv, ensurepip" >/dev/null 2>&1; then
+    return 0
+  fi
+  if ! command -v apt-get >/dev/null 2>&1; then
+    log "ERROR: python3 venv/ensurepip is missing and apt-get is not available."
+    return 1
+  fi
+  log "Installing python3-venv and python3-pip (ensurepip is missing)"
+  sudo apt-get update -qq
+  sudo apt-get install -y python3-venv python3-pip
+}
+
+venv_usable() {
+  [ -x "$VENV_DIR/bin/python" ] && "$VENV_DIR/bin/python" -m pip --version >/dev/null 2>&1
+}
+
 # --- 1. Python virtualenv ---------------------------------------------------
 log "Creating virtualenv at $VENV_DIR"
-if [ ! -x "$VENV_DIR/bin/python" ]; then
+ensure_venv_packages
+if ! venv_usable; then
+  rm -rf "$VENV_DIR"
   python3 -m venv "$VENV_DIR"
 fi
 # shellcheck disable=SC1091
@@ -45,12 +66,16 @@ fi
 python -m pip install --upgrade pip setuptools wheel >/dev/null
 
 # --- 2. Shared package -------------------------------------------------------
-log "Installing arkguru-common (shared schema/tokenizer/chunking/datastore/worker/rrf)"
+if ! COMMON_DIR="$(find_common)"; then
+  log "ERROR: could not find arkguru-common (sibling checkout or ./arkguru-common)."
+  exit 1
+fi
+log "Installing arkguru-common from $COMMON_DIR (schema/tokenizer/chunking/datastore/worker/rrf)"
 pip install -e "${COMMON_DIR}[parquet,test]"
 
 # --- 3. Phase dependencies ---------------------------------------------------
 # The phase requirements pin `-e ../arkguru-common`; we install that path
-# explicitly above, so we strip the line to avoid depending on a sibling layout.
+# explicitly above, so we strip the line to avoid a second, conflicting checkout.
 install_reqs() {
   local repo="$1"; shift
   local extra=("$@")

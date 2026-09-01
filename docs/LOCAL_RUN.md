@@ -6,23 +6,26 @@ The companion document is [CLOUD_RUN.md](CLOUD_RUN.md).
 
 ## Layout
 
-Clone the umbrella repo and the three phase repos as **siblings**. `arkguru-common` is vendored inside this repo (not a separate GitHub project).
+Clone the shared package, this umbrella repo, and the phase repos as **siblings**. `arkguru-common` is a first-class GitHub repo; this umbrella also vendors a copy under `./arkguru-common` as a fallback when the sibling is missing. Phase 2 (`arkguru-web-scraping`) is optional.
 
 ```
 some-dir/
-  arkguru-pdf-converter/     # this repo (common + env setup)
+  arkguru-common/            # shared package (preferred)
+  arkguru-pdf-converter/     # this repo (env setup + vendored common fallback)
     arkguru-common/
   arkguru-pdf-extraction/    # Phase 1
-  arkguru-web-scraping/      # Phase 2
+  arkguru-web-scraping/      # Phase 2 (optional)
   arkguru-rag-slm/           # Phase 3
 ```
 
 ```bash
 mkdir -p ~/arkguru && cd ~/arkguru
+git clone https://github.com/ravidsun/arkguru-common.git
 git clone https://github.com/ravidsun/arkguru-pdf-converter.git
 git clone https://github.com/ravidsun/arkguru-pdf-extraction.git
-git clone https://github.com/ravidsun/arkguru-web-scraping.git
 git clone https://github.com/ravidsun/arkguru-rag-slm.git
+# optional Phase 2:
+# git clone https://github.com/ravidsun/arkguru-web-scraping.git
 ```
 
 Python 3.9+ is required. On Debian/Ubuntu also install `python3-venv` (and `python3-pip` if needed).
@@ -49,9 +52,9 @@ source .venv/bin/activate
 
 The script is idempotent. It:
 
-1. Creates `.venv` in this repo (override with `ARKGURU_VENV`).
-2. Installs the vendored `arkguru-common` package (`import common` works in every phase).
-3. Installs Phase 1 and Phase 2 requirements, plus `reportlab` (sample PDF fixture).
+1. Creates `.venv` in this repo (override with `ARKGURU_VENV`). On Debian/Ubuntu it installs `python3-venv` if `ensurepip` is missing.
+2. Installs `arkguru-common` from the sibling checkout when present, otherwise the vendored copy (`import common` works in every phase).
+3. Installs Phase 1 requirements plus `reportlab` (sample PDF fixture), and Phase 2 requirements if that repo is checked out.
 4. Installs the **offline** Phase 3 core (`numpy`, `rank-bm25`) so retrieval works without downloading models.
 
 The virtualenv lives in `arkguru-pdf-converter/.venv`. Activate it before running any phase.
@@ -72,8 +75,8 @@ That pull is large (transformers, sentence-transformers, FlagEmbedding, ragas, l
 With the venv activated:
 
 ```bash
-# Shared package
-pytest arkguru-common/tests -q
+# Shared package (sibling checkout; fall back to ./arkguru-common/tests)
+python -m pytest ../arkguru-common/tests -q
 ```
 
 ### Phase 1 — PDF → chunks
