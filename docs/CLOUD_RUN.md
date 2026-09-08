@@ -90,6 +90,8 @@ pip install -r ../arkguru-rag-slm/requirements.txt
 
 That is slow and network-heavy; only do it when you need real embeddings or generation.
 
+**32 PDFs:** default Cloud path (Phase 1 + hashing, no OCR packages, no GPU) is about **15–45 minutes** for native-text manuals. CPU `bge-m3` after installing the full stack is about **1–2.5 hours**. Scanned PDFs need Tesseract installed in the session or OCR will not run.
+
 ## Smoke test in a Cloud Agent
 
 ```bash
