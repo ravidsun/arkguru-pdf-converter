@@ -71,7 +71,7 @@ if ! COMMON_DIR="$(find_common)"; then
   exit 1
 fi
 log "Installing arkguru-common from $COMMON_DIR (schema/tokenizer/chunking/datastore/worker/rrf)"
-pip install -e "${COMMON_DIR}[parquet,test]"
+pip install -e "${COMMON_DIR}[parquet,postgres,test]"
 
 # --- 3. Phase dependencies ---------------------------------------------------
 # The phase requirements pin `-e ../arkguru-common`; we install that path
@@ -91,8 +91,9 @@ install_reqs() {
 for name in "${PHASES[@]}"; do
   if repo="$(find_phase "$name")"; then
     case "$name" in
-      # Phase 1 needs reportlab to generate the built-in sample PDF fixture.
-      arkguru-pdf-extraction) install_reqs "$repo" "reportlab>=4.0" ;;
+      # Phase 1 needs reportlab to generate the built-in sample PDF fixture,
+      # plus psycopg/pgvector for --sink postgres (also pulled by common[postgres]).
+      arkguru-pdf-extraction) install_reqs "$repo" "reportlab>=4.0" "psycopg[binary]>=3.2" "pgvector>=0.3" ;;
       # Phase 3's full requirements.txt pulls a heavy ML/serving stack
       # (transformers, sentence-transformers, FlagEmbedding, ragas, llama-index,
       # ...). For a lean, offline-capable dev environment we install only the
