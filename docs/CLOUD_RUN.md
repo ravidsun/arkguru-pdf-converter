@@ -67,8 +67,8 @@ source .venv/bin/activate
 
 The Cloud `install` script matches the **offline** local bootstrap:
 
-- `arkguru-common` (schema, tokenizer, chunking, datastore, worker, RRF) + pytest
-- Phase 1: pymupdf / pymupdf4llm, tiktoken, reportlab (sample PDF)
+- `arkguru-common` (schema, tokenizer, chunking, datastore, worker, RRF) + pytest + **postgres extra** (`psycopg`, `pgvector`)
+- Phase 1: pymupdf / pymupdf4llm, tiktoken, reportlab (sample PDF), `psycopg` / `pgvector` for `--sink postgres`
 - Phase 2 (only if that repo is checked out): httpx, trafilatura, datasketch, …
 - Phase 3 core only: numpy + rank-bm25
 
@@ -76,7 +76,7 @@ The Cloud `install` script matches the **offline** local bootstrap:
 
 - `sentence-transformers`, transformers, peft, ragas, llama-index, FlagEmbedding
 - System OCR: tesseract, ghostscript
-- Postgres / pgvector
+- A Postgres **server** (Python `psycopg` / `pgvector` clients **are** installed via `arkguru-common[postgres]`)
 - Ollama / llama.cpp
 
 Retrieval still works: `--embedder hashing` plus BM25, with extractive answers when Ollama is absent.
@@ -122,6 +122,32 @@ python -m phase3_rag.run_pdfs \
   --ask "What PPE is required before servicing a unit?"
 ```
 
+### Two-table Postgres smoke (optional)
+
+Phase 1 writes **`chunks`** only (`chunk_index` is 0-based on that table). Phase 3 `embed_datastore` fills **`chunk_embeddings`**. In the Table Editor, look at `chunks.chunk_index`, not `chunk_embeddings` (that table has no `chunk_index` column; a `0` can look blank).
+
+Use a **Session pooler** DSN (`aws-<region>.pooler.supabase.com:5432`, user `postgres.<ref>`, `sslmode=require`) as runtime secret `PG_DSN`:
+
+```bash
+source /agent/repos/arkguru-pdf-converter/.venv/bin/activate
+cd /agent/repos/arkguru-pdf-extraction
+python scripts/make_sample_pdf.py
+python -m phase1_pdf.pipeline --config config/config.yaml --init-db
+python -m phase1_pdf.pipeline --input data/raw_pdfs --sink postgres --workers 1 --no-figures
+
+cd /agent/repos/arkguru-rag-slm
+python -m phase3_rag.embed_datastore --embedder hashing --dim 1024
+# or: python -m phase3_rag.run_pdfs --pdfs ../arkguru-pdf-extraction/data/raw_pdfs \
+#        --sink postgres --embedder hashing
+```
+
+Confirm with SQL (not Table Editor guesswork):
+
+```sql
+SELECT chunk_id, chunk_index, source_id, page FROM chunks ORDER BY source_id, chunk_index;
+SELECT count(*) FROM chunk_embeddings;
+```
+
 Phase 2 is skipped unless `arkguru-web-scraping` is checked out. When it is, a local HTTP fixture avoids public crawls:
 
 ```bash
@@ -139,7 +165,7 @@ python -m phase2_web.pipeline --seeds http://127.0.0.1:8899/index.html --max-pag
 |---|---|
 | GPU / Intel NUC features | Not available. Stay on hashing embeddings and extractive answers unless you explicitly install the heavy stack. |
 | Ollama | Not started by `install`. `phase3_rag.serve` logs that Ollama is unreachable and returns the top passage. |
-| Postgres | Optional. File sink (`data/processed/*.jsonl`) is the default. |
+| Postgres | Optional. File sink (`data/processed/*.jsonl`) is the default. For a two-table smoke against Supabase, set runtime secret `PG_DSN` to the **Session pooler** URI (port **5432**, user `postgres.<ref>`, `sslmode=require`). Do not use Direct `db.<ref>.supabase.co` (IPv6-only) or transaction pooler port 6543. |
 | Egress | Crawling public sites in Phase 2 depends on the environment network policy. Prefer a local `http.server` fixture when egress is restricted. |
 | Secrets | Do not put API keys in `environment.json` or committed scripts. Use Cursor environment secrets for `FIRECRAWL_API_KEY` / `PG_DSN` if needed. |
 | `python3-venv` | Required to create `.venv`. The install script installs `python3-venv` / `python3-pip` via apt when `ensurepip` is missing. |

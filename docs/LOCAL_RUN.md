@@ -53,8 +53,8 @@ source .venv/bin/activate
 The script is idempotent. It:
 
 1. Creates `.venv` in this repo (override with `ARKGURU_VENV`). On Debian/Ubuntu it installs `python3-venv` if `ensurepip` is missing.
-2. Installs `arkguru-common` from the sibling checkout when present, otherwise the vendored copy (`import common` works in every phase).
-3. Installs Phase 1 requirements plus `reportlab` (sample PDF fixture), and Phase 2 requirements if that repo is checked out.
+2. Installs `arkguru-common` from the sibling checkout when present, otherwise the vendored copy (`import common` works in every phase), including the **`postgres` extra** (`psycopg`, `pgvector`).
+3. Installs Phase 1 requirements plus `reportlab` (sample PDF fixture) and Postgres clients, and Phase 2 requirements if that repo is checked out.
 4. Installs the **offline** Phase 3 core (`numpy`, `rank-bm25`) so retrieval works without downloading models.
 
 The virtualenv lives in `arkguru-pdf-converter/.venv`. Activate it before running any phase.
@@ -121,6 +121,33 @@ make e2e
 
 `make e2e` asks *"What does error code E14 mean?"* against the sample handbook. If Ollama is not running, the answer is extractive (top retrieved passage).
 
+## Two-table Postgres smoke
+
+Phase 1 `--sink postgres` fills **`chunks`** (`chunk_index` is 0-based). It does **not** write vectors. Phase 3 `embed_datastore` fills **`chunk_embeddings`**. In the Table Editor, inspect `chunks.chunk_index` — `chunk_embeddings` has no such column, and `0` can look blank.
+
+Local Docker/native DSN, or a Supabase **Session pooler** URI (`aws-<region>.pooler.supabase.com:5432`, user `postgres.<ref>`, `sslmode=require`):
+
+```bash
+export PG_DSN=postgresql://rag:change-me@localhost:5432/rag   # or Session pooler URI
+cd ../arkguru-pdf-extraction
+python scripts/make_sample_pdf.py
+python -m phase1_pdf.pipeline --init-db
+python -m phase1_pdf.pipeline --input data/raw_pdfs --sink postgres --workers 1
+
+cd ../arkguru-rag-slm
+python -m phase3_rag.embed_datastore --embedder hashing --dim 1024
+# equivalent one-liner:
+# python -m phase3_rag.run_pdfs --pdfs ../arkguru-pdf-extraction/data/raw_pdfs \
+#     --sink postgres --embedder hashing
+```
+
+```sql
+SELECT chunk_id, chunk_index, source_id, page FROM chunks ORDER BY source_id, chunk_index;
+SELECT count(*) FROM chunk_embeddings;
+```
+
+See [DATABASE_SETUP.md](https://github.com/ravidsun/arkguru-pdf-extraction/blob/main/docs/DATABASE_SETUP.md) Option D for Supabase Session pooler details.
+
 ## Production-style local run
 
 Postgres + pgvector, sentence-transformer embeddings, and a local LLM via Ollama.
@@ -159,9 +186,12 @@ python -m phase2_web.pipeline --config config/config.yaml --sink postgres
 
 ```bash
 cd ../arkguru-rag-slm
+python -m phase3_rag.embed_datastore --embedder hashing --dim 1024   # Cloud-safe
+# NUC:
 python -m phase3_rag.embed_datastore --embedder sentence_transformer \
     --model BAAI/bge-m3 --dim 1024
-# or, from a combined JSONL: make index   # Postgres, not data/store/*.npz
+# or: make index / python -m phase3_rag.index --embed-only --embedder hashing
+# JSONL corpus → Postgres (not the local .npz store): make index
 ollama serve &
 python -m phase3_rag.serve
 # file-mode alternative (no DSN): python -m phase3_rag.run_pdfs --pdfs ... --embedder hashing --chat
@@ -175,6 +205,8 @@ python -m phase3_rag.serve
 | `arkguru-pdf-extraction` | `make worker` | Watch `data/raw_pdfs` |
 | `arkguru-web-scraping` | `make phase2` | Crawl seeds in config |
 | `arkguru-rag-slm` | `make from-pdfs PDFS=... ASK="..."` | PDF → ingest → ask |
+| `arkguru-rag-slm` | `make from-pdfs PDFS=... SINK=postgres` | PDF → `chunks` + `chunk_embeddings` |
+| `arkguru-rag-slm` | `make embed-db` | Fill `chunk_embeddings` (hashing) |
 | `arkguru-rag-slm` | `make e2e` | Offline orchestrator pass |
 | `arkguru-rag-slm` | `make serve` | Interactive RAG chat |
 | `arkguru-rag-slm` | `make backup` | Dump `chunks` + embeddings if watermark moved |
