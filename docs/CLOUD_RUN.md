@@ -211,9 +211,9 @@ python -m phase2_web.pipeline --seeds http://127.0.0.1:8899/index.html --max-pag
 |---|---|
 | GPU / Intel NUC features | Not available. Stay on hashing embeddings and extractive answers unless you explicitly install the heavy stack. |
 | Ollama | Not started by `install`. `phase3_rag.serve` logs that Ollama is unreachable and returns the top passage. |
-| Postgres | Optional. File sink (`data/processed/*.jsonl`) is the default. For a two-table smoke against Supabase, set runtime secret `PG_DSN` to the **Session pooler** URI (port **5432**, user `postgres.<ref>`, `sslmode=require`). Do not use Direct `db.<ref>.supabase.co` (IPv6-only) or transaction pooler port 6543. |
+| Postgres | Optional. File sink (`data/processed/*.jsonl`) is the default. For a two-table smoke against Supabase, set **environment-scoped** secret `PG_DSN` to the **Session pooler** URI (port **5432**, user `postgres.<ref>`, `sslmode=require`). Do not use Direct `db.<ref>.supabase.co` (IPv6-only) or transaction pooler port 6543. |
 | Egress | Crawling public sites in Phase 2 depends on the environment network policy. Prefer a local `http.server` fixture when egress is restricted. |
-| Secrets | Do not put API keys in `environment.json` or committed scripts. Use Cursor environment secrets for `FIRECRAWL_API_KEY` / `PG_DSN` if needed. |
+| Secrets | Do not put API keys in `environment.json` or committed scripts. Add `PG_DSN` (and `FIRECRAWL_API_KEY` if needed) as an **environment-scoped Runtime Secret or Environment Variable** on this Cloud Agent environment so every agent receives it. `start` (`arkguru-common/scripts/start_services.sh`) copies `PG_DSN` into gitignored `.env` files in each repo; it must not overwrite an injected secret with the local `127.0.0.1` DSN. |
 | `python3-venv` | Required to create `.venv`. The install script installs `python3-venv` / `python3-pip` via apt when `ensurepip` is missing. |
 | `install` vs `start` | Dependency install belongs in `install`. Do not put `ollama serve` or a crawl worker in `install` — they would block snapshotting. Put long-running processes in `start` or `terminals` only if you add them later. |
 
@@ -236,4 +236,5 @@ Do not combine a Dockerfile, an explicit image, and a snapshot in the same confi
 
 - [`.cursor/environment.json`](../.cursor/environment.json)
 - [`scripts/setup_dev_env.sh`](../scripts/setup_dev_env.sh)
+- [`../arkguru-common/scripts/start_services.sh`](https://github.com/ravidsun/arkguru-common/blob/develop/scripts/start_services.sh) — Cloud `start`; publishes `PG_DSN` into gitignored `.env` files
 - [`../arkguru-common/README.md`](https://github.com/ravidsun/arkguru-common) (sibling) or the vendored [arkguru-common/README.md](../arkguru-common/README.md)
