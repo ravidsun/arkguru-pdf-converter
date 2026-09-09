@@ -63,6 +63,52 @@ source /agent/repos/arkguru-pdf-converter/.venv/bin/activate
 source .venv/bin/activate
 ```
 
+## Bring your PDFs (Cloud Agent)
+
+The agent runs on a **remote Linux VM**. It cannot read folders on your PC
+(for example `C:\Users\ravid\Downloads\...`). Copying into a local git clone of
+`data/raw_pdfs/` also does nothing for this agent.
+
+**Ingest directory on the VM:**
+
+```
+/agent/repos/arkguru-pdf-extraction/data/raw_pdfs/
+```
+
+Subfolders are searched recursively (`hvac/manual.pdf` → source id `hvac/manual.pdf`).
+That tree is **gitignored** (`data/raw_pdfs/*` except `.gitkeep`) — do not commit the corpus.
+
+**Send a batch (recommended):** zip the folder on Windows, then attach the `.zip` to a
+Cloud Agent prompt or follow-up.
+
+```powershell
+Compress-Archive -Path "C:\Users\ravid\Downloads\AstrologyBooks-20260908T054904Z-1-001\AstrologyBooks\VedicAstro_potdar" `
+  -DestinationPath "$env:USERPROFILE\Downloads\VedicAstro_potdar.zip"
+```
+
+In the agent chat: attach `VedicAstro_potdar.zip` and ask it to unpack into
+`/agent/repos/arkguru-pdf-extraction/data/raw_pdfs/VedicAstro_potdar` and run Phase 1.
+
+Attaching individual PDFs works for a handful of files; a zip is better for a bookshelf.
+
+**After files are on the VM:**
+
+```bash
+source /agent/repos/arkguru-pdf-converter/.venv/bin/activate
+cd /agent/repos/arkguru-pdf-extraction
+python -m phase1_pdf.pipeline --input data/raw_pdfs --sink postgres --workers 1
+```
+
+Phase 1 fills `chunks` only. Then:
+
+```bash
+cd /agent/repos/arkguru-rag-slm
+python -m phase3_rag.embed_datastore --embedder hashing --dim 1024
+```
+
+Needs runtime secret `PG_DSN` (Supabase **Session pooler**, port 5432) for `--sink postgres`.
+Omit `--sink postgres` to write JSONL under `data/processed/` instead.
+
 ## What is installed (and what is not)
 
 The Cloud `install` script matches the **offline** local bootstrap:
