@@ -1,0 +1,26 @@
+{
+  "folders": [
+    {
+      "name": "common",
+      "path": "arkguru-common"
+    },
+    {
+      "name": "pdf-extraction",
+      "path": "arkguru-pdf-extraction"
+    },
+    {
+      "name": "web-scraping",
+      "path": "arkguru-web-scraping"
+    },
+    {
+      "name": "rag-slm",
+      "path": "arkguru-rag-slm"
+    }
+  ],
+  "settings": {
+    "git.autoRepositoryDetection": true,
+    "git.detectSubmodules": true,
+    "git.detectSubmodulesLimit": 10,
+    "git.repositoryScanMaxDepth": 1
+  }
+}

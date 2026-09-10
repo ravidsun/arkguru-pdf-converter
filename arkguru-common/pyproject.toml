@@ -25,3 +25,7 @@ test = ["pytest>=7.0"]
 
 [tool.setuptools]
 packages = ["common"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

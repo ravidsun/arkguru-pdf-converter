@@ -18,10 +18,16 @@ top-level module.
 | `common.schema` | The shared `Chunk` dataclass + JSONL/Parquet I/O (`read_jsonl`, `write_jsonl`, `read_parquet`, `write_parquet`). |
 | `common.tokenizer` | `count_tokens` / `truncate_to_tokens` (tiktoken `cl100k_base` proxy, with a char-based fallback). |
 | `common.chunking` | `split_sentences` + `pack_windows` — the structure-aware windowing shared by Phase 1 and Phase 2. |
-| `common.datastore` | `ChunkStore` — two-table Postgres + pgvector datastore (`chunks` + `chunk_embeddings`). |
+| `common.datastore` | `ChunkStore` — two-table Postgres + pgvector (`chunks` text + `chunk_embeddings` vectors). Upsert does not reset `created_at` on conflict. `iter_missing_embeddings` uses a named server-side cursor. |
 | `common.datastore_config` | `open_chunk_store`, `load_datastore_config`, `resolve_dsn` — config-driven datastore factory (no hardcoded DSNs). |
 | `common.worker` | `Worker` (resilient run-loop with signal handling) + `FolderState` (new/changed file tracking). |
 | `common.rrf` | `reciprocal_rank_fusion` — fuse dense + lexical ranked runs (Phase 3 retrieval). |
+
+## Datastore contracts
+
+- Two tables: `chunks` (source of truth) and `chunk_embeddings` (model-specific, ON DELETE CASCADE).
+- `upsert()` updates payload columns on `chunk_id` conflict and **leaves `created_at` unchanged** so backup watermarks ignore no-op re-ingests.
+- `iter_missing_embeddings(batch=…)` uses a named (server-side) cursor and `itersize` so the client does not buffer the full result set.
 
 ## Install
 

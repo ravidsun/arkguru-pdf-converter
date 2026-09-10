@@ -84,7 +84,7 @@ python -m pytest ../arkguru-common/tests -q
 ```bash
 cd ../arkguru-pdf-extraction
 python scripts/make_sample_pdf.py     # data/raw_pdfs/sample_handbook.pdf
-make phase1                           # data/processed/sample_handbook.jsonl
+make phase1                           # data/processed/sample_handbook/chunks.jsonl
 ```
 
 Drop your own PDFs in `data/raw_pdfs/` and re-run `make phase1`.
@@ -153,11 +153,21 @@ See [DATABASE_SETUP.md](https://github.com/ravidsun/arkguru-pdf-extraction/blob/
 Postgres + pgvector, sentence-transformer embeddings, and a local LLM via Ollama.
 
 1. Install the full Phase 3 requirements (see above).
-2. Start Postgres with the `vector` extension. See [DATABASE_SETUP.md](https://github.com/ravidsun/arkguru-pdf-extraction/blob/main/docs/DATABASE_SETUP.md).
+2. Start Postgres with the `vector` extension, **or** point at hosted Supabase.
+   See [DATABASE_SETUP.md](https://github.com/ravidsun/arkguru-pdf-extraction/blob/main/docs/DATABASE_SETUP.md)
+   (**Option D — Supabase**): session pooler URI (port **5432**, not transaction
+   **6543**), `sslmode=require`, `PG_DSN` only in `.env` (never commit it).
+   Retrieve is **fail-closed** when `PG_DSN` is set but connect fails. Daily
+   dump: from `arkguru-rag-slm`, `python -m phase3_rag.backup --once` or
+   `make backup`.
 
 ```bash
+# Local Docker / native (Option A–C)
 export PG_DSN=postgresql://user:pass@localhost:5432/rag
 psql "$PG_DSN" -c "CREATE EXTENSION IF NOT EXISTS vector;"
+
+# Hosted Supabase (Option D): copy session pooler URI into .env as PG_DSN
+# cp ../arkguru-rag-slm/.env.example ../arkguru-rag-slm/.env
 ```
 
 3. Ingest to files or `--sink postgres`:
@@ -172,18 +182,19 @@ python -m phase2_web.pipeline --config config/config.yaml --sink postgres
 
 4. Fine-tune (optional, CPU hours), merge/quantize, register with Ollama as `domain-slm` (see the header of `phase3_rag/serve.py`).
 
-5. Index and chat. If chunks are already in Postgres, skip JSONL upsert:
+5. Embed (if chunks are already in Postgres) and chat:
 
 ```bash
 cd ../arkguru-rag-slm
 python -m phase3_rag.embed_datastore --embedder hashing --dim 1024   # Cloud-safe
 # NUC:
-# python -m phase3_rag.embed_datastore --embedder sentence_transformer --model BAAI/bge-m3 --dim 1024
+python -m phase3_rag.embed_datastore --embedder sentence_transformer \
+    --model BAAI/bge-m3 --dim 1024
 # or: make index / python -m phase3_rag.index --embed-only --embedder hashing
+# JSONL corpus → Postgres (not the local .npz store): make index
 ollama serve &
-python -m phase3_rag.run_pdfs --pdfs ../arkguru-pdf-extraction/data/raw_pdfs \
-  --embedder sentence_transformer --model domain-slm --chat
-# or: make serve
+python -m phase3_rag.serve
+# file-mode alternative (no DSN): python -m phase3_rag.run_pdfs --pdfs ... --embedder hashing --chat
 ```
 
 ## Useful make targets
@@ -198,6 +209,8 @@ python -m phase3_rag.run_pdfs --pdfs ../arkguru-pdf-extraction/data/raw_pdfs \
 | `arkguru-rag-slm` | `make embed-db` | Fill `chunk_embeddings` (hashing) |
 | `arkguru-rag-slm` | `make e2e` | Offline orchestrator pass |
 | `arkguru-rag-slm` | `make serve` | Interactive RAG chat |
+| `arkguru-rag-slm` | `make backup` | Dump `chunks` + embeddings if watermark moved |
+| `arkguru-rag-slm` | `make index` | JSONL → **Postgres** chunks + embeddings |
 
 ## Troubleshooting
 

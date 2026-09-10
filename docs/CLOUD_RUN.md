@@ -63,6 +63,52 @@ source /agent/repos/arkguru-pdf-converter/.venv/bin/activate
 source .venv/bin/activate
 ```
 
+## Bring your PDFs (Cloud Agent)
+
+The agent runs on a **remote Linux VM**. It cannot read folders on your PC
+(for example `C:\Users\ravid\Downloads\...`). Copying into a local git clone of
+`data/raw_pdfs/` also does nothing for this agent.
+
+**Ingest directory on the VM:**
+
+```
+/agent/repos/arkguru-pdf-extraction/data/raw_pdfs/
+```
+
+Subfolders are searched recursively (`hvac/manual.pdf` → source id `hvac/manual.pdf`).
+That tree is **gitignored** (`data/raw_pdfs/*` except `.gitkeep`) — do not commit the corpus.
+
+**Send a batch (recommended):** zip the folder on Windows, then attach the `.zip` to a
+Cloud Agent prompt or follow-up.
+
+```powershell
+Compress-Archive -Path "C:\Users\ravid\Downloads\AstrologyBooks-20260908T054904Z-1-001\AstrologyBooks\VedicAstro_potdar" `
+  -DestinationPath "$env:USERPROFILE\Downloads\VedicAstro_potdar.zip"
+```
+
+In the agent chat: attach `VedicAstro_potdar.zip` and ask it to unpack into
+`/agent/repos/arkguru-pdf-extraction/data/raw_pdfs/VedicAstro_potdar` and run Phase 1.
+
+Attaching individual PDFs works for a handful of files; a zip is better for a bookshelf.
+
+**After files are on the VM:**
+
+```bash
+source /agent/repos/arkguru-pdf-converter/.venv/bin/activate
+cd /agent/repos/arkguru-pdf-extraction
+python -m phase1_pdf.pipeline --input data/raw_pdfs --sink postgres --workers 1
+```
+
+Phase 1 fills `chunks` only. Then:
+
+```bash
+cd /agent/repos/arkguru-rag-slm
+python -m phase3_rag.embed_datastore --embedder hashing --dim 1024
+```
+
+Needs runtime secret `PG_DSN` (Supabase **Session pooler**, port 5432) for `--sink postgres`.
+Omit `--sink postgres` to write JSONL under `data/processed/` instead.
+
 ## What is installed (and what is not)
 
 The Cloud `install` script matches the **offline** local bootstrap:
@@ -89,6 +135,8 @@ pip install -r ../arkguru-rag-slm/requirements.txt
 ```
 
 That is slow and network-heavy; only do it when you need real embeddings or generation.
+
+**32 PDFs:** default Cloud path (Phase 1 + hashing, no OCR packages, no GPU) is about **15–45 minutes** for native-text manuals. CPU `bge-m3` after installing the full stack is about **1–2.5 hours**. Scanned PDFs need Tesseract installed in the session or OCR will not run.
 
 ## Smoke test in a Cloud Agent
 
@@ -163,9 +211,9 @@ python -m phase2_web.pipeline --seeds http://127.0.0.1:8899/index.html --max-pag
 |---|---|
 | GPU / Intel NUC features | Not available. Stay on hashing embeddings and extractive answers unless you explicitly install the heavy stack. |
 | Ollama | Not started by `install`. `phase3_rag.serve` logs that Ollama is unreachable and returns the top passage. |
-| Postgres | Optional. File sink (`data/processed/*.jsonl`) is the default. For a two-table smoke against Supabase, set runtime secret `PG_DSN` to the **Session pooler** URI (port **5432**, user `postgres.<ref>`, `sslmode=require`). Do not use Direct `db.<ref>.supabase.co` (IPv6-only) or transaction pooler port 6543. |
+| Postgres | Optional. File sink (`data/processed/*.jsonl`) is the default. For a two-table smoke against Supabase, set **environment-scoped** secret `PG_DSN` to the **Session pooler** URI (port **5432**, user `postgres.<ref>`, `sslmode=require`). Do not use Direct `db.<ref>.supabase.co` (IPv6-only) or transaction pooler port 6543. |
 | Egress | Crawling public sites in Phase 2 depends on the environment network policy. Prefer a local `http.server` fixture when egress is restricted. |
-| Secrets | Do not put API keys in `environment.json` or committed scripts. Use Cursor environment secrets for `FIRECRAWL_API_KEY` / `PG_DSN` if needed. |
+| Secrets | Do not put API keys in `environment.json` or committed scripts. Add `PG_DSN` (and `FIRECRAWL_API_KEY` if needed) as an **environment-scoped Runtime Secret or Environment Variable** on this Cloud Agent environment so every agent receives it. `start` (`arkguru-common/scripts/start_services.sh`) copies `PG_DSN` into gitignored `.env` files in each repo; it must not overwrite an injected secret with the local `127.0.0.1` DSN. |
 | `python3-venv` | Required to create `.venv`. The install script installs `python3-venv` / `python3-pip` via apt when `ensurepip` is missing. |
 | `install` vs `start` | Dependency install belongs in `install`. Do not put `ollama serve` or a crawl worker in `install` — they would block snapshotting. Put long-running processes in `start` or `terminals` only if you add them later. |
 
@@ -188,4 +236,5 @@ Do not combine a Dockerfile, an explicit image, and a snapshot in the same confi
 
 - [`.cursor/environment.json`](../.cursor/environment.json)
 - [`scripts/setup_dev_env.sh`](../scripts/setup_dev_env.sh)
+- [`../arkguru-common/scripts/start_services.sh`](https://github.com/ravidsun/arkguru-common/blob/develop/scripts/start_services.sh) — Cloud `start`; publishes `PG_DSN` into gitignored `.env` files
 - [`../arkguru-common/README.md`](https://github.com/ravidsun/arkguru-common) (sibling) or the vendored [arkguru-common/README.md](../arkguru-common/README.md)
