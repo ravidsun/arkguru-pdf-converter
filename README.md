@@ -169,9 +169,11 @@ make combine
 For corpora >10K chunks or to share with Phase 1/2:
 
 ```bash
-# Local / VPS: compose.yaml in this repo (pgvector/pgvector:pg16)
-docker compose up -d
-export PG_DSN=postgresql://rag:change-me@localhost:5432/rag
+# Native local Postgres (port 5432) or Docker compose (port 5433):
+bash scripts/detect_local_pg.sh
+# or:
+# export PG_DSN=postgresql://arkguru:arkguru@127.0.0.1:5432/arkguru
+# docker compose up -d && export PG_DSN=postgresql://rag:change-me@127.0.0.1:5433/rag
 
 # Hosted: paste a Supabase session-pooler URI, or Neon / Crunchy / RDS / …
 # export PG_DSN='postgresql://user:pass@HOST:5432/DB?sslmode=require'
@@ -432,7 +434,7 @@ MIT (each repo independently licensed)
 A: No. Start with local files (`data/store/*.jsonl`). Postgres is optional for scale (>100K chunks) and team sharing.
 
 **Q: Can I use Neon / RDS / a local Docker DB instead of Supabase?**  
-A: Yes, if it is PostgreSQL 14+ with pgvector. Set `PG_DSN` (see [`.env.example`](.env.example) and [compose.yaml](compose.yaml)).
+A: Yes, if it is PostgreSQL 14+ with pgvector. Native local is port 5432; Docker compose is port 5433. Run `bash scripts/detect_local_pg.sh` or set `PG_DSN` (see [`.env.example`](.env.example) and [compose.yaml](compose.yaml)).
 
 **Q: Can I use a different LLM?**  
 A: Yes. Phase 3 defaults to `Qwen2.5-3B-Instruct`, but supports any GGUF in Ollama (Mistral, Llama, Phi, etc.). Swap `base_model` in config and re-fine-tune.

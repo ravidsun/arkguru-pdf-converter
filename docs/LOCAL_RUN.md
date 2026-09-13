@@ -125,11 +125,24 @@ make e2e
 
 The datastore is one Postgres + pgvector client. Switch hosts by changing `PG_DSN` (or copying [`.env.example`](../.env.example) → `.env`). No provider-specific backend.
 
-**Local / VPS Docker** — [compose.yaml](../compose.yaml) (`pgvector/pgvector:pg16`):
+**Detect local native vs Docker** (writes gitignored `.env`, never prints the DSN):
+
+```bash
+bash scripts/detect_local_pg.sh
+```
+
+**Native local Postgres** — Homebrew / apt / `arkguru-common/scripts/start_services.sh` on host port **5432**:
+
+```bash
+export PG_DSN=postgresql://arkguru:arkguru@127.0.0.1:5432/arkguru
+# or: export PG_DSN=postgresql://rag:change-me@127.0.0.1:5432/rag
+```
+
+**Local Docker** — [compose.yaml](../compose.yaml) (`pgvector/pgvector:pg16`) on host port **5433** so it does not clash with native:
 
 ```bash
 docker compose up -d
-export PG_DSN=postgresql://rag:change-me@localhost:5432/rag
+export PG_DSN=postgresql://rag:change-me@127.0.0.1:5433/rag
 ```
 
 **Hosted Supabase** — session pooler (port **5432**, not transaction **6543**), user `postgres.<ref>`:
@@ -144,10 +157,11 @@ export PG_DSN='postgresql://postgres.PROJECT_REF:PASSWORD@aws-0-REGION.pooler.su
 
 Phase 1 `--sink postgres` fills **`chunks`** (`chunk_index` is 0-based). It does **not** write vectors. Phase 3 `embed_datastore` fills **`chunk_embeddings`**. In the Table Editor, inspect `chunks.chunk_index` — `chunk_embeddings` has no such column, and `0` can look blank.
 
-Local Docker/native DSN (`docker compose up -d` in this repo), or a Supabase **Session pooler** URI (`aws-<region>.pooler.supabase.com:5432`, user `postgres.<ref>`, `sslmode=require`):
+Native DSN on **5432**, Docker DSN on **5433** (`bash scripts/detect_local_pg.sh`), or a Supabase **Session pooler** URI (`aws-<region>.pooler.supabase.com:5432`, user `postgres.<ref>`, `sslmode=require`):
 
 ```bash
-export PG_DSN=postgresql://rag:change-me@localhost:5432/rag   # or Session pooler URI
+export PG_DSN=postgresql://rag:change-me@127.0.0.1:5433/rag   # Docker; native uses :5432
+# or Session pooler URI
 cd ../arkguru-pdf-extraction
 python scripts/make_sample_pdf.py
 python -m phase1_pdf.pipeline --init-db
@@ -172,8 +186,9 @@ See [DATABASE_SETUP.md](https://github.com/ravidsun/arkguru-pdf-extraction/blob/
 Postgres + pgvector, sentence-transformer embeddings, and a local LLM via Ollama.
 
 1. Install the full Phase 3 requirements (see above).
-2. Start Postgres with the `vector` extension (`docker compose up -d` here),
-   **or** point `PG_DSN` at hosted Supabase / Neon / any Postgres + pgvector.
+2. Start native Postgres on 5432 **or** `docker compose up -d` (host 5433),
+   then `bash scripts/detect_local_pg.sh`, **or** point `PG_DSN` at hosted
+   Supabase / Neon / any Postgres + pgvector.
    See [DATABASE_SETUP.md](https://github.com/ravidsun/arkguru-pdf-extraction/blob/main/docs/DATABASE_SETUP.md)
    (**Option D — Supabase**): session pooler URI (port **5432**, not transaction
    **6543**), `sslmode=require`, `PG_DSN` only in `.env` (never commit it).
@@ -182,9 +197,11 @@ Postgres + pgvector, sentence-transformer embeddings, and a local LLM via Ollama
    `make backup`.
 
 ```bash
-# Local Docker (compose.yaml in this repo) / native (Option A–C)
-docker compose up -d
-export PG_DSN=postgresql://rag:change-me@localhost:5432/rag
+# Native (5432) or Docker (5433). Detect and write .env:
+bash scripts/detect_local_pg.sh
+# or set one of:
+# export PG_DSN=postgresql://arkguru:arkguru@127.0.0.1:5432/arkguru
+# export PG_DSN=postgresql://rag:change-me@127.0.0.1:5433/rag
 psql "$PG_DSN" -c "CREATE EXTENSION IF NOT EXISTS vector;"
 
 # Hosted Supabase (Option D) or other hosted pgvector: copy URI into .env as PG_DSN

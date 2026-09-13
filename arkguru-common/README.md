@@ -18,7 +18,8 @@ top-level module.
 | `common.schema` | The shared `Chunk` dataclass + JSONL/Parquet I/O (`read_jsonl`, `write_jsonl`, `read_parquet`, `write_parquet`). |
 | `common.tokenizer` | `count_tokens` / `truncate_to_tokens` (tiktoken `cl100k_base` proxy, with a char-based fallback). |
 | `common.chunking` | `split_sentences` + `pack_windows` — the structure-aware windowing shared by Phase 1 and Phase 2. |
-| `common.datastore` | `ChunkStore` — two-table Postgres + pgvector (`chunks` text + `chunk_embeddings` vectors). Host-agnostic `PG_DSN` (Supabase, Neon, RDS, local Docker). Upsert does not reset `created_at` on conflict. `iter_missing_embeddings` uses a named server-side cursor. |
+| `common.datastore` | `ChunkStore` — two-table Postgres + pgvector (`chunks` text + `chunk_embeddings` vectors). Host-agnostic `PG_DSN` (Supabase, Neon, RDS, native local, Docker). Upsert does not reset `created_at` on conflict. `iter_missing_embeddings` uses a named server-side cursor. |
+| `common.local_pg` | Detect native (5432) vs Docker (5433) local Postgres and keep an injected remote `PG_DSN`. |
 | `common.datastore_config` | `open_chunk_store`, `load_datastore_config`, `resolve_dsn` — config-driven datastore factory (no hardcoded DSNs). |
 | `common.worker` | `Worker` (resilient run-loop with signal handling) + `FolderState` (new/changed file tracking). |
 | `common.rrf` | `reciprocal_rank_fusion` — fuse dense + lexical ranked runs (Phase 3 retrieval). |
