@@ -1,0 +1,30 @@
+# Local / self-hosted Postgres + pgvector for the arkguru two-table datastore.
+# Laptop and VPS use the same file. Switch the app with PG_DSN only.
+#
+#   docker compose up -d
+#   export PG_DSN=postgresql://rag:change-me@localhost:5432/rag
+#
+# Hosted Supabase / Neon / RDS: do not start this stack; put their URI in PG_DSN.
+# Baserow, Appwrite, Pinecone, Qdrant, Weaviate are not drop-ins.
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: arkguru-pg
+    environment:
+      POSTGRES_USER: rag
+      POSTGRES_PASSWORD: change-me
+      POSTGRES_DB: rag
+    ports:
+      - "5432:5432"
+    volumes:
+      - arkguru_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rag -d rag"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+volumes:
+  arkguru_pgdata:
