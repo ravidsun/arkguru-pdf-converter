@@ -18,7 +18,7 @@ top-level module.
 | `common.schema` | The shared `Chunk` dataclass + JSONL/Parquet I/O (`read_jsonl`, `write_jsonl`, `read_parquet`, `write_parquet`). |
 | `common.tokenizer` | `count_tokens` / `truncate_to_tokens` (tiktoken `cl100k_base` proxy, with a char-based fallback). |
 | `common.chunking` | `split_sentences` + `pack_windows` — the structure-aware windowing shared by Phase 1 and Phase 2. |
-| `common.datastore` | `ChunkStore` — two-table Postgres + pgvector (`chunks` text + `chunk_embeddings` vectors). Upsert does not reset `created_at` on conflict. `iter_missing_embeddings` uses a named server-side cursor. |
+| `common.datastore` | `ChunkStore` — two-table Postgres + pgvector (`chunks` text + `chunk_embeddings` vectors). Host-agnostic `PG_DSN` (Supabase, Neon, RDS, local Docker). Upsert does not reset `created_at` on conflict. `iter_missing_embeddings` uses a named server-side cursor. |
 | `common.datastore_config` | `open_chunk_store`, `load_datastore_config`, `resolve_dsn` — config-driven datastore factory (no hardcoded DSNs). |
 | `common.worker` | `Worker` (resilient run-loop with signal handling) + `FolderState` (new/changed file tracking). |
 | `common.rrf` | `reciprocal_rank_fusion` — fuse dense + lexical ranked runs (Phase 3 retrieval). |
@@ -26,6 +26,7 @@ top-level module.
 ## Datastore contracts
 
 - Two tables: `chunks` (source of truth) and `chunk_embeddings` (model-specific, ON DELETE CASCADE).
+- Connection is DSN-only: remote hosts get `sslmode=require` when omitted; loopback/Docker is left alone. Override with `PG_SSLMODE` or an explicit URI `sslmode`. Not a drop-in for Baserow or dedicated vector DBs.
 - `upsert()` updates payload columns on `chunk_id` conflict and **leaves `created_at` unchanged** so backup watermarks ignore no-op re-ingests.
 - `iter_missing_embeddings(batch=…)` uses a named (server-side) cursor and `itersize` so the client does not buffer the full result set.
 
