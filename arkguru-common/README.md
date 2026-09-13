@@ -26,7 +26,7 @@ top-level module.
 ## Datastore contracts
 
 - Two tables: `chunks` (source of truth) and `chunk_embeddings` (model-specific, ON DELETE CASCADE).
-- Connection is DSN-only: remote hosts get `sslmode=require` when omitted; loopback/Docker is left alone. Override with `PG_SSLMODE` or an explicit URI `sslmode`. Not a drop-in for Baserow or dedicated vector DBs.
+- Connection is DSN-only: remote hosts get `sslmode=require` when omitted; loopback/Docker is left alone. Override with `PG_SSLMODE` or an explicit URI `sslmode`.
 - `upsert()` updates payload columns on `chunk_id` conflict and **leaves `created_at` unchanged** so backup watermarks ignore no-op re-ingests.
 - `iter_missing_embeddings(batch=…)` uses a named (server-side) cursor and `itersize` so the client does not buffer the full result set.
 

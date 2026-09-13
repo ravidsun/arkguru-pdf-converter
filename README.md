@@ -182,7 +182,7 @@ psql "$PG_DSN" -c "CREATE EXTENSION IF NOT EXISTS vector;"
 # Tables are auto-created by Phase 1, Phase 2, or Phase 3 on first run
 ```
 
-Switch hosts by changing `PG_DSN` only. Baserow, Appwrite, and dedicated vector DBs (Pinecone, Qdrant, Weaviate) are **not** drop-ins.
+Switch hosts by changing `PG_DSN` only. The host must be PostgreSQL 14+ with pgvector.
 
 See [docs/LOCAL_RUN.md](docs/LOCAL_RUN.md#switch-database-pg_dsn), [compose.yaml](compose.yaml), or [docs/DATABASE_SETUP.md](arkguru-pdf-extraction/docs/DATABASE_SETUP.md) for full setup.
 
@@ -432,7 +432,7 @@ MIT (each repo independently licensed)
 A: No. Start with local files (`data/store/*.jsonl`). Postgres is optional for scale (>100K chunks) and team sharing.
 
 **Q: Can I use Neon / RDS / a local Docker DB instead of Supabase?**  
-A: Yes, if it is PostgreSQL 14+ with pgvector. Set `PG_DSN` (see [`.env.example`](.env.example) and [compose.yaml](compose.yaml)). Do not use Baserow or a dedicated vector DB as the store.
+A: Yes, if it is PostgreSQL 14+ with pgvector. Set `PG_DSN` (see [`.env.example`](.env.example) and [compose.yaml](compose.yaml)).
 
 **Q: Can I use a different LLM?**  
 A: Yes. Phase 3 defaults to `Qwen2.5-3B-Instruct`, but supports any GGUF in Ollama (Mistral, Llama, Phi, etc.). Swap `base_model` in config and re-fine-tune.

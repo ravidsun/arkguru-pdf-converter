@@ -5,7 +5,6 @@
 #   export PG_DSN=postgresql://rag:change-me@localhost:5432/rag
 #
 # Hosted Supabase / Neon / RDS: do not start this stack; put their URI in PG_DSN.
-# Baserow, Appwrite, Pinecone, Qdrant, Weaviate are not drop-ins.
 
 services:
   postgres:

@@ -140,8 +140,6 @@ export PG_DSN='postgresql://postgres.PROJECT_REF:PASSWORD@aws-0-REGION.pooler.su
 
 **Other hosted Postgres + pgvector** (Neon, Crunchy Bridge, Timescale/Tiger, Aiven, RDS/Aurora, Cloud SQL, Azure Database, DigitalOcean/Railway/Render): paste their session/direct URI into `PG_DSN`. Remote hosts get `sslmode=require` when omitted. Optional `PG_SSLMODE=require|prefer|disable`. Prefer a session/direct connection — named cursors used by `iter_missing_embeddings` break on transaction poolers.
 
-**Not drop-ins:** Baserow, NocoDB, Directus, Appwrite, PocketBase, Firebase, or dedicated vector DBs (Pinecone, Qdrant, Weaviate, Milvus, Chroma). Use `pgvector/pgvector` (or any Postgres with the `vector` extension), not `baserow/baserow`.
-
 ## Two-table Postgres smoke
 
 Phase 1 `--sink postgres` fills **`chunks`** (`chunk_index` is 0-based). It does **not** write vectors. Phase 3 `embed_datastore` fills **`chunk_embeddings`**. In the Table Editor, inspect `chunks.chunk_index` — `chunk_embeddings` has no such column, and `0` can look blank.
