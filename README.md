@@ -186,7 +186,7 @@ psql "$PG_DSN" -c "CREATE EXTENSION IF NOT EXISTS vector;"
 
 Switch hosts by changing `PG_DSN` only. The host must be PostgreSQL 14+ with pgvector.
 
-See [docs/LOCAL_RUN.md](docs/LOCAL_RUN.md#switch-database-pg_dsn), [compose.yaml](compose.yaml), or [docs/DATABASE_SETUP.md](arkguru-pdf-extraction/docs/DATABASE_SETUP.md) for full setup.
+See [docs/DATABASE_SETUP.md](docs/DATABASE_SETUP.md), [docs/LOCAL_RUN.md](docs/LOCAL_RUN.md#switch-database-pg_dsn), or [compose.yaml](compose.yaml).
 
 #### 3. Fine-tune (optional but recommended)
 
@@ -467,5 +467,5 @@ A: Phase 3 includes `eval_ragas.py`, which computes context precision/recall/fai
 - [Phase 1 README](arkguru-pdf-extraction/README.md) — detailed extraction, OCR, chunking strategies
 - [Phase 2 README](arkguru-web-scraping/README.md) — crawl, extract, near-dedup logic
 - [Phase 3 README](arkguru-rag-slm/README.md) — fine-tuning, retrieval, serving, evaluation
-- [Database Setup](arkguru-pdf-extraction/docs/DATABASE_SETUP.md) — Postgres + pgvector on local/remote
+- [Database setup](docs/DATABASE_SETUP.md) — Postgres + pgvector: native, Docker, hosted
 - [compose.yaml](compose.yaml) — local / VPS `pgvector/pgvector:pg16`

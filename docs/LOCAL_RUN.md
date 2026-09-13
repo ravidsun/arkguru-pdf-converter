@@ -123,7 +123,7 @@ make e2e
 
 ## Switch database (`PG_DSN`)
 
-The datastore is one Postgres + pgvector client. Switch hosts by changing `PG_DSN` (or copying [`.env.example`](../.env.example) → `.env`). No provider-specific backend.
+The datastore is one Postgres + pgvector client. Switch hosts by changing `PG_DSN` (or copying [`.env.example`](../.env.example) → `.env`). No provider-specific backend. Full guide: [DATABASE_SETUP.md](DATABASE_SETUP.md).
 
 **Detect local native vs Docker** (writes gitignored `.env`, never prints the DSN):
 
@@ -179,7 +179,7 @@ SELECT chunk_id, chunk_index, source_id, page FROM chunks ORDER BY source_id, ch
 SELECT count(*) FROM chunk_embeddings;
 ```
 
-See [DATABASE_SETUP.md](https://github.com/ravidsun/arkguru-pdf-extraction/blob/main/docs/DATABASE_SETUP.md) Option D for Supabase Session pooler details.
+See [DATABASE_SETUP.md](DATABASE_SETUP.md) for native, Docker, Supabase, and other hosts.
 
 ## Production-style local run
 
@@ -189,7 +189,7 @@ Postgres + pgvector, sentence-transformer embeddings, and a local LLM via Ollama
 2. Start native Postgres on 5432 **or** `docker compose up -d` (host 5433),
    then `bash scripts/detect_local_pg.sh`, **or** point `PG_DSN` at hosted
    Supabase / Neon / any Postgres + pgvector.
-   See [DATABASE_SETUP.md](https://github.com/ravidsun/arkguru-pdf-extraction/blob/main/docs/DATABASE_SETUP.md)
+   See [DATABASE_SETUP.md](DATABASE_SETUP.md)
    (**Option D — Supabase**): session pooler URI (port **5432**, not transaction
    **6543**), `sslmode=require`, `PG_DSN` only in `.env` (never commit it).
    Retrieve is **fail-closed** when `PG_DSN` is set but connect fails. Daily
