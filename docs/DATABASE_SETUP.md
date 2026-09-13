@@ -25,7 +25,34 @@ or an explicit `?sslmode=`. Prefer a **session or direct** URI — transaction
 poolers break the named cursor in `iter_missing_embeddings`.
 
 `.env` is gitignored. Copy [`.env.example`](../.env.example) → `.env`, or run
-the detect helper below. Never commit a password.
+the one-click Docker script / detect helper below. Never commit a password.
+
+---
+
+## One-click local Docker
+
+From this repo (requires Docker Engine or Desktop already installed):
+
+```bash
+bash scripts/setup_docker_pg.sh
+```
+
+That pulls `pgvector/pgvector:pg16`, starts [compose.yaml](../compose.yaml) on
+host port **5433**, writes gitignored `.env`, and prints:
+
+| Field | Value |
+| --- | --- |
+| host | `127.0.0.1` |
+| port | `5433` (`ARKGURU_PG_PORT` to override) |
+| database | `rag` |
+| user | `rag` |
+| password | `change-me` |
+| `PG_DSN` | `postgresql://rag:change-me@127.0.0.1:5433/rag` |
+| `psql` | `PGPASSWORD=change-me psql -h 127.0.0.1 -p 5433 -U rag -d rag` |
+
+An already-exported `PG_DSN` (hosted Supabase/Neon) still wins over `.env`.
+`unset PG_DSN` to use Docker. Use `bash scripts/detect_local_pg.sh` when a
+server is already running and you only need `.env` written.
 
 ---
 
@@ -69,10 +96,15 @@ Image `pgvector/pgvector:pg16`. Host port **5433** so native 5432 can coexist.
 Override with `ARKGURU_PG_PORT`.
 
 ```bash
-# from arkguru-pdf-converter
+# from arkguru-pdf-converter — pull image, start, write .env, print DSN
+bash scripts/setup_docker_pg.sh
+```
+
+Manual equivalent:
+
+```bash
 docker compose up -d
 export PG_DSN=postgresql://rag:change-me@127.0.0.1:5433/rag
-# or: bash scripts/detect_local_pg.sh
 ```
 
 Equivalent one-liner:
@@ -346,6 +378,7 @@ python -m phase1_pdf.pipeline --init-db
 ## Related
 
 - [compose.yaml](../compose.yaml) — local Docker pgvector
-- [scripts/detect_local_pg.sh](../scripts/detect_local_pg.sh) — pick native vs Docker
+- [scripts/setup_docker_pg.sh](../scripts/setup_docker_pg.sh) — one-click pull, start, write `PG_DSN`
+- [scripts/detect_local_pg.sh](../scripts/detect_local_pg.sh) — pick native vs Docker if already running
 - [LOCAL_RUN.md](LOCAL_RUN.md) — full local pipeline
 - [CLOUD_RUN.md](CLOUD_RUN.md) — Cloud Agent + hosted `PG_DSN`

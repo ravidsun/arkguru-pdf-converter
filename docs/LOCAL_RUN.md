@@ -138,11 +138,12 @@ export PG_DSN=postgresql://arkguru:arkguru@127.0.0.1:5432/arkguru
 # or: export PG_DSN=postgresql://rag:change-me@127.0.0.1:5432/rag
 ```
 
-**Local Docker** — [compose.yaml](../compose.yaml) (`pgvector/pgvector:pg16`) on host port **5433** so it does not clash with native:
+**Local Docker** — one-click pull + start + `.env` ([compose.yaml](../compose.yaml), host port **5433**):
 
 ```bash
-docker compose up -d
-export PG_DSN=postgresql://rag:change-me@127.0.0.1:5433/rag
+bash scripts/setup_docker_pg.sh
+# PG_DSN=postgresql://rag:change-me@127.0.0.1:5433/rag
+# user=rag  password=change-me  db=rag  host=127.0.0.1  port=5433
 ```
 
 **Hosted Supabase** — session pooler (port **5432**, not transaction **6543**), user `postgres.<ref>`:

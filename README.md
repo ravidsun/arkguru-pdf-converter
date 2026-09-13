@@ -169,11 +169,10 @@ make combine
 For corpora >10K chunks or to share with Phase 1/2:
 
 ```bash
-# Native local Postgres (port 5432) or Docker compose (port 5433):
-bash scripts/detect_local_pg.sh
-# or:
-# export PG_DSN=postgresql://arkguru:arkguru@127.0.0.1:5432/arkguru
-# docker compose up -d && export PG_DSN=postgresql://rag:change-me@127.0.0.1:5433/rag
+# One-click Docker Postgres (port 5433) + write .env:
+bash scripts/setup_docker_pg.sh
+# Native already running (port 5432) or Docker already up:
+# bash scripts/detect_local_pg.sh
 
 # Hosted: paste a Supabase session-pooler URI, or Neon / Crunchy / RDS / …
 # export PG_DSN='postgresql://user:pass@HOST:5432/DB?sslmode=require'
@@ -434,7 +433,7 @@ MIT (each repo independently licensed)
 A: No. Start with local files (`data/store/*.jsonl`). Postgres is optional for scale (>100K chunks) and team sharing.
 
 **Q: Can I use Neon / RDS / a local Docker DB instead of Supabase?**  
-A: Yes, if it is PostgreSQL 14+ with pgvector. Native local is port 5432; Docker compose is port 5433. Run `bash scripts/detect_local_pg.sh` or set `PG_DSN` (see [`.env.example`](.env.example) and [compose.yaml](compose.yaml)).
+A: Yes, if it is PostgreSQL 14+ with pgvector. Native local is port 5432; Docker compose is port 5433. Run `bash scripts/setup_docker_pg.sh` (one-click Docker) or `bash scripts/detect_local_pg.sh`, or set `PG_DSN` (see [docs/DATABASE_SETUP.md](docs/DATABASE_SETUP.md)).
 
 **Q: Can I use a different LLM?**  
 A: Yes. Phase 3 defaults to `Qwen2.5-3B-Instruct`, but supports any GGUF in Ollama (Mistral, Llama, Phi, etc.). Swap `base_model` in config and re-fine-tune.
