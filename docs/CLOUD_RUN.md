@@ -235,6 +235,7 @@ Do not combine a Dockerfile, an explicit image, and a snapshot in the same confi
 ## Related files
 
 - [`.cursor/environment.json`](../.cursor/environment.json)
+- [`DATABASE_SETUP.md`](DATABASE_SETUP.md) — native, Docker, hosted `PG_DSN`
 - [`scripts/setup_dev_env.sh`](../scripts/setup_dev_env.sh)
 - [`../arkguru-common/scripts/start_services.sh`](https://github.com/ravidsun/arkguru-common/blob/develop/scripts/start_services.sh) — Cloud `start`; publishes `PG_DSN` into gitignored `.env` files
 - [`../arkguru-common/README.md`](https://github.com/ravidsun/arkguru-common) (sibling) or the vendored [arkguru-common/README.md](../arkguru-common/README.md)
