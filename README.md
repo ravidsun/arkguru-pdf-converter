@@ -169,15 +169,24 @@ make combine
 For corpora >10K chunks or to share with Phase 1/2:
 
 ```bash
-export PG_DSN=postgresql://user:pass@localhost:5432/rag
+# Native local Postgres (port 5432) or Docker compose (port 5433):
+bash scripts/detect_local_pg.sh
+# or:
+# export PG_DSN=postgresql://arkguru:arkguru@127.0.0.1:5432/arkguru
+# docker compose up -d && export PG_DSN=postgresql://rag:change-me@127.0.0.1:5433/rag
 
-# Create extension (run once):
-psql $PG_DSN -c "CREATE EXTENSION IF NOT EXISTS vector;"
+# Hosted: paste a Supabase session-pooler URI, or Neon / Crunchy / RDS / …
+# export PG_DSN='postgresql://user:pass@HOST:5432/DB?sslmode=require'
+
+# Create extension (run once; the app also does this):
+psql "$PG_DSN" -c "CREATE EXTENSION IF NOT EXISTS vector;"
 
 # Tables are auto-created by Phase 1, Phase 2, or Phase 3 on first run
 ```
 
-See individual repo docs or [docs/DATABASE_SETUP.md](arkguru-pdf-extraction/docs/DATABASE_SETUP.md) for full setup.
+Switch hosts by changing `PG_DSN` only. The host must be PostgreSQL 14+ with pgvector.
+
+See [docs/DATABASE_SETUP.md](docs/DATABASE_SETUP.md), [docs/LOCAL_RUN.md](docs/LOCAL_RUN.md#switch-database-pg_dsn), or [compose.yaml](compose.yaml).
 
 #### 3. Fine-tune (optional but recommended)
 
@@ -424,6 +433,9 @@ MIT (each repo independently licensed)
 **Q: Do I need Postgres?**  
 A: No. Start with local files (`data/store/*.jsonl`). Postgres is optional for scale (>100K chunks) and team sharing.
 
+**Q: Can I use Neon / RDS / a local Docker DB instead of Supabase?**  
+A: Yes, if it is PostgreSQL 14+ with pgvector. Native local is port 5432; Docker compose is port 5433. Run `bash scripts/detect_local_pg.sh` or set `PG_DSN` (see [`.env.example`](.env.example) and [compose.yaml](compose.yaml)).
+
 **Q: Can I use a different LLM?**  
 A: Yes. Phase 3 defaults to `Qwen2.5-3B-Instruct`, but supports any GGUF in Ollama (Mistral, Llama, Phi, etc.). Swap `base_model` in config and re-fine-tune.
 
@@ -455,4 +467,5 @@ A: Phase 3 includes `eval_ragas.py`, which computes context precision/recall/fai
 - [Phase 1 README](arkguru-pdf-extraction/README.md) — detailed extraction, OCR, chunking strategies
 - [Phase 2 README](arkguru-web-scraping/README.md) — crawl, extract, near-dedup logic
 - [Phase 3 README](arkguru-rag-slm/README.md) — fine-tuning, retrieval, serving, evaluation
-- [Database Setup](arkguru-pdf-extraction/docs/DATABASE_SETUP.md) — Postgres + pgvector on local/remote
+- [Database setup](docs/DATABASE_SETUP.md) — Postgres + pgvector: native, Docker, hosted
+- [compose.yaml](compose.yaml) — local / VPS `pgvector/pgvector:pg16`

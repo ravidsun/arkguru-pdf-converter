@@ -1,0 +1,31 @@
+# Local / self-hosted Postgres + pgvector for the arkguru two-table datastore.
+# Native Homebrew/apt Postgres keeps host port 5432. This container is
+# published on 5433 (override with ARKGURU_PG_PORT) so both can coexist.
+#
+#   docker compose up -d
+#   export PG_DSN=postgresql://rag:change-me@127.0.0.1:5433/rag
+#   # or: bash scripts/detect_local_pg.sh
+#
+# Hosted Supabase / Neon / RDS: do not start this stack; put their URI in PG_DSN.
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: arkguru-pg
+    environment:
+      POSTGRES_USER: rag
+      POSTGRES_PASSWORD: change-me
+      POSTGRES_DB: rag
+    ports:
+      - "${ARKGURU_PG_PORT:-5433}:5432"
+    volumes:
+      - arkguru_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rag -d rag"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+volumes:
+  arkguru_pgdata:
