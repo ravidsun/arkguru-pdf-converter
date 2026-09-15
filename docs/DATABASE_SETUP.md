@@ -54,6 +54,47 @@ An already-exported `PG_DSN` (hosted Supabase/Neon) still wins over `.env`.
 `unset PG_DSN` to use Docker. Use `bash scripts/detect_local_pg.sh` when a
 server is already running and you only need `.env` written.
 
+### Portable dump and image
+
+`docker commit` of `arkguru-pg` does **not** copy the named volume. To move a
+filled `rag` database:
+
+1. Custom dump (gzip; includes `chunks`, `chunk_embeddings`, pgvector, indexes):
+
+```bash
+PGPASSWORD=change-me pg_dump --format=custom --no-owner --no-acl \
+  -h 127.0.0.1 -p 5433 -U rag -d rag -f arkguru-rag.dump
+```
+
+2. Restore into any Postgres 16 + pgvector:
+
+```bash
+pg_restore --no-owner --no-acl -d "$PG_DSN" arkguru-rag.dump
+```
+
+3. Load a prebuilt snapshot image (`arkguru-pg:with-data`) produced with
+   `PGDATA=/var/lib/postgresql/pgdata` so data is in the image layer, not a
+   volume:
+
+```bash
+docker load -i arkguru-pg-with-data.tar
+docker run -d --name arkguru-pg -p 5433:5432 arkguru-pg:with-data
+# same loopback DSN as the table above (rag / change-me / 5433)
+```
+
+The image already has `POSTGRES_USER`/`PASSWORD`/`DB` and `PGDATA` set. Do not
+mount an empty volume over `/var/lib/postgresql/pgdata` or the corpus is hidden.
+Do not commit `.dump` or `.tar` files to git (GitHub’s web upload cap is 100 MB).
+
+Intended share folder (`version1`, anyone with the link can edit):
+
+https://drive.google.com/drive/folders/1NoeUwbHEUQlqb-qoI25fTlB1eXKG6tJi
+
+Drop `arkguru-rag.dump` (~60 MB) there while signed into a Google account. Drive
+still requires login to add files; “anyone with the link can edit” does not allow
+anonymous API or browser uploads. The optional Docker image tar is ~3 GB and is
+slower to copy than restoring the dump.
+
 ---
 
 ## Detect local native vs Docker
