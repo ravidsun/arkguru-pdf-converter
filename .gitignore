@@ -10,6 +10,8 @@ artifacts/
 *.gguf
 *.parquet
 .env
+data/backups/*
+!data/backups/.gitkeep
 
 # Nested sibling clones — each is its own git repo
 arkguru-common/

@@ -194,8 +194,9 @@ Postgres + pgvector, sentence-transformer embeddings, and a local LLM via Ollama
    (**Option D — Supabase**): session pooler URI (port **5432**, not transaction
    **6543**), `sslmode=require`, `PG_DSN` only in `.env` (never commit it).
    Retrieve is **fail-closed** when `PG_DSN` is set but connect fails. Daily
-   dump: from `arkguru-rag-slm`, `python -m phase3_rag.backup --once` or
-   `make backup`.
+   dump: `bash scripts/backup_complete_pg.sh` (whole database) or from
+   `arkguru-rag-slm`, `python -m phase3_rag.backup --once` (two tables when
+   the watermark moved) / `make backup`.
 
 ```bash
 # Native (5432) or Docker (5433). Detect and write .env:
