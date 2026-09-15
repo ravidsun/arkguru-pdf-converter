@@ -171,6 +171,8 @@ For corpora >10K chunks or to share with Phase 1/2:
 ```bash
 # One-click Docker Postgres (port 5433) + write .env:
 bash scripts/setup_docker_pg.sh
+# Complete backup of the whole database (gitignored under data/backups/):
+# bash scripts/backup_complete_pg.sh --docker
 # Native already running (port 5432) or Docker already up:
 # bash scripts/detect_local_pg.sh
 

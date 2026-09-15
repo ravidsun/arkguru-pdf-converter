@@ -56,6 +56,49 @@ server is already running and you only need `.env` written.
 
 ---
 
+## Complete database backup
+
+Dumps the **entire** database (pgvector extension, schema, `chunks`,
+`chunk_embeddings`, primary keys, FKs, GIN + HNSW indexes, table data) plus
+cluster roles. This is not the Phase 3 watermark job, which copies only the
+two tables when `created_at` moved.
+
+```bash
+# PG_DSN from the environment or .env, else local Docker on 5433
+bash scripts/backup_complete_pg.sh
+
+# This VM / any shell that still has a hosted PG_DSN exported:
+unset PG_DSN
+bash scripts/backup_complete_pg.sh --docker
+```
+
+Writes gitignored files under `data/backups/` (or `--out-dir`):
+
+- `arkguru-<db>-<UTC>.dump` — custom-format `pg_dump --create` (gzip)
+- `arkguru-<db>-<UTC>.globals.sql` — `pg_dumpall --globals-only` (includes role password hashes)
+- `arkguru-<db>-<UTC>.manifest.txt` — sizes, row counts, SHA-256, TOC
+
+Do not commit dump files. GitHub’s web upload cap is 100 MB; keep backups in
+Drive, S3, or a local disk. Shared Drive folder (`version1`):
+
+https://drive.google.com/drive/folders/1NoeUwbHEUQlqb-qoI25fTlB1eXKG6tJi
+
+Restore into an existing Postgres 16 + pgvector database:
+
+```bash
+pg_restore --no-owner --no-acl --dbname="$PG_DSN" data/backups/arkguru-rag-YYYYMMDD-HHMMSS.dump
+```
+
+Recreate the database (connects to `postgres`, then `CREATE DATABASE`):
+
+```bash
+pg_restore --create --no-owner --no-acl \
+  --dbname=postgresql://rag:change-me@127.0.0.1:5433/postgres \
+  data/backups/arkguru-rag-YYYYMMDD-HHMMSS.dump
+```
+
+---
+
 ## Detect local native vs Docker
 
 If a native cluster and Docker compose can both exist on one machine, they use
@@ -366,8 +409,9 @@ python -m phase1_pdf.pipeline --init-db
 - **Re-embed with a new model:** `TRUNCATE chunk_embeddings;` then re-run
   `phase3_rag.embed_datastore`. If `dim` changes, update `config/datastore.yaml`
   and drop/recreate `chunk_embeddings` (vector width is fixed at create).
-- **Backups:** `python -m phase3_rag.backup --once` / `make backup`, or
-  `pg_dump "$PG_DSN"`.
+- **Backups:** `bash scripts/backup_complete_pg.sh` for the whole database.
+  Phase 3 `python -m phase3_rag.backup --once` only dumps the two tables when
+  the `created_at` watermark moved.
 - **Sizing:** each embedding is `dim * 4` bytes (bge-m3 1024-d ≈ 4 KB/row) plus
   the HNSW index; chunk text is usually larger. 100k chunks fits a small VPS.
 - **VPS security:** strong password + `scram-sha-256`, restrict `pg_hba.conf`,
@@ -379,6 +423,7 @@ python -m phase1_pdf.pipeline --init-db
 
 - [compose.yaml](../compose.yaml) — local Docker pgvector
 - [scripts/setup_docker_pg.sh](../scripts/setup_docker_pg.sh) — one-click pull, start, write `PG_DSN`
+- [scripts/backup_complete_pg.sh](../scripts/backup_complete_pg.sh) — complete database + roles dump
 - [scripts/detect_local_pg.sh](../scripts/detect_local_pg.sh) — pick native vs Docker if already running
 - [LOCAL_RUN.md](LOCAL_RUN.md) — full local pipeline
 - [CLOUD_RUN.md](CLOUD_RUN.md) — Cloud Agent + hosted `PG_DSN`
