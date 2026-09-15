@@ -84,7 +84,16 @@ docker run -d --name arkguru-pg -p 5433:5432 arkguru-pg:with-data
 
 The image already has `POSTGRES_USER`/`PASSWORD`/`DB` and `PGDATA` set. Do not
 mount an empty volume over `/var/lib/postgresql/pgdata` or the corpus is hidden.
-Do not commit `.dump` or `.tar` files to git.
+Do not commit `.dump` or `.tar` files to git (GitHub’s web upload cap is 100 MB).
+
+Intended share folder (`version1`, anyone with the link can edit):
+
+https://drive.google.com/drive/folders/1NoeUwbHEUQlqb-qoI25fTlB1eXKG6tJi
+
+Drop `arkguru-rag.dump` (~60 MB) there while signed into a Google account. Drive
+still requires login to add files; “anyone with the link can edit” does not allow
+anonymous API or browser uploads. The optional Docker image tar is ~3 GB and is
+slower to copy than restoring the dump.
 
 ---
 
