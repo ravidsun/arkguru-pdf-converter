@@ -56,6 +56,28 @@ server is already running and you only need `.env` written.
 
 ---
 
+## Schema (DDL only)
+
+Table definitions live in [sql/rag_schema.sql](../sql/rag_schema.sql) (~4 KB, no
+row data). Apply to an empty Postgres 16 + pgvector database:
+
+```bash
+psql "$PG_DSN" -v ON_ERROR_STOP=1 -f sql/rag_schema.sql
+```
+
+Extract the same DDL from a custom dump:
+
+```bash
+pg_restore --schema-only --no-owner --no-acl -f rag_schema.sql arkguru-rag.dump
+```
+
+This creates `vector`, `chunks`, `chunk_embeddings` (dim 1024), PKs, the
+`source_id` btree, GIN `ts`, HNSW cosine index, and the embeddings FK.
+`ensure_schema()` in `common/datastore.py` builds the same objects on first
+write, so you do not need this file for a normal ingest.
+
+---
+
 ## Detect local native vs Docker
 
 If a native cluster and Docker compose can both exist on one machine, they use
@@ -378,6 +400,7 @@ python -m phase1_pdf.pipeline --init-db
 ## Related
 
 - [compose.yaml](../compose.yaml) — local Docker pgvector
+- [sql/rag_schema.sql](../sql/rag_schema.sql) — schema-only DDL (no row data)
 - [scripts/setup_docker_pg.sh](../scripts/setup_docker_pg.sh) — one-click pull, start, write `PG_DSN`
 - [scripts/detect_local_pg.sh](../scripts/detect_local_pg.sh) — pick native vs Docker if already running
 - [LOCAL_RUN.md](LOCAL_RUN.md) — full local pipeline
