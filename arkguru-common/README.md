@@ -18,17 +18,19 @@ top-level module.
 | `common.schema` | The shared `Chunk` dataclass + JSONL/Parquet I/O (`read_jsonl`, `write_jsonl`, `read_parquet`, `write_parquet`). |
 | `common.tokenizer` | `count_tokens` / `truncate_to_tokens` (tiktoken `cl100k_base` proxy, with a char-based fallback). |
 | `common.chunking` | `split_sentences` + `pack_windows` — the structure-aware windowing shared by Phase 1 and Phase 2. |
-| `common.datastore` | `ChunkStore` — two-table Postgres + pgvector (`chunks` text + `chunk_embeddings` vectors). Host-agnostic `PG_DSN` (Supabase, Neon, RDS, native local, Docker). Upsert does not reset `created_at` on conflict. `iter_missing_embeddings` uses a named server-side cursor. |
+| `common.datastore` | `ChunkStore` — two-table Postgres + pgvector (`chunks` text + `chunk_embeddings` vectors). Host-agnostic `PG_DSN` (Supabase, Neon, RDS, native local, Docker). `search_chunks()` is the hybrid retrieve (SQL RRF). Upsert does not reset `created_at` on conflict. `iter_missing_embeddings` uses a named server-side cursor. |
 | `common.local_pg` | Detect native (5432) vs Docker (5433) local Postgres and keep an injected remote `PG_DSN`. |
 | `common.datastore_config` | `open_chunk_store`, `load_datastore_config`, `resolve_dsn` — config-driven datastore factory (no hardcoded DSNs). |
 | `common.worker` | `Worker` (resilient run-loop with signal handling) + `FolderState` (new/changed file tracking). |
-| `common.rrf` | `reciprocal_rank_fusion` — fuse dense + lexical ranked runs (Phase 3 retrieval). |
+| `common.rrf` | `reciprocal_rank_fusion` — Python fusion for file/npz retrieve. Postgres hybrid is SQL `search_chunks()`. |
 
 ## Datastore contracts
 
 - Two tables: `chunks` (source of truth) and `chunk_embeddings` (model-specific, ON DELETE CASCADE).
 - Connection is DSN-only: remote hosts get `sslmode=require` when omitted; loopback/Docker is left alone. Override with `PG_SSLMODE` or an explicit URI `sslmode`.
-- `upsert()` updates payload columns on `chunk_id` conflict and **leaves `created_at` unchanged** so backup watermarks ignore no-op re-ingests.
+- `upsert()` updates payload columns on `chunk_id` conflict and **leaves `created_at` unchanged** so backup watermarks ignore no-op re-ingests. It logs `chunk_index` min/max/nulls. `ensure_schema()` adds missing `chunks` columns (including `chunk_index NOT NULL`) and installs `search_chunks()`.
+- Retrieval hits include `chunk_id`, `text`, `section`, `source_id`, `page`, `url`, `parent_id`, `chunk_index`, `title`, `lang`, plus `rrf_score`, `dense_rank`, `lexical_rank` from `search_chunks()`.
+- `search_chunks(query_text, query_embedding, …)` is the Phase 3 retrieve API when `PG_DSN` is set. Caller embeds; SQL fuses HNSW cosine on `chunk_embeddings` with GIN `ts` on `chunks` (`is_parent = false`). If the function is missing, `ensure_schema()` runs once and the SELECT is retried. `search_dense` / `search_lexical` remain for single-leg debugging. File/npz retrieve still uses `reciprocal_rank_fusion`.
 - `iter_missing_embeddings(batch=…)` uses a named (server-side) cursor and `itersize` so the client does not buffer the full result set.
 
 ## Install

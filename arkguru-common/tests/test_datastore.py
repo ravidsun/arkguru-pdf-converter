@@ -9,6 +9,8 @@ from common.datastore import (
     _ensure_vector_extension,
     _migrate_chunk_columns,
     _redact_secret,
+    _search_chunks_ddl,
+    _undefined_function,
 )
 from common.schema import Chunk
 
@@ -37,6 +39,9 @@ class _FakeCursor:
 
     def fetchall(self):
         return list(self._rows)
+
+    def fetchone(self):
+        return self._rows[0] if self._rows else None
 
     def __iter__(self):
         return iter(self._rows)
@@ -226,3 +231,62 @@ def test_fetch_by_ids_selects_chunk_index(monkeypatch):
     assert "chunk_index" in cur.sql
     assert got["id0"]["chunk_index"] == 0
     assert got["id0"]["title"] == "T"
+
+
+def test_search_chunks_ddl_uses_hnsw_safe_dense_subquery():
+    sql = _search_chunks_ddl("chunks", "chunk_embeddings")
+    assert "CREATE OR REPLACE FUNCTION search_chunks" in sql
+    assert "FROM chunk_embeddings v" in sql
+    assert "ORDER BY v.embedding <=> query_embedding" in sql
+    assert "LIMIT k_dense" in sql
+    assert "is_parent = false" in sql
+    assert "1.0 / (rrf_k + d.rnk)" in sql
+    assert "FULL OUTER JOIN lexical" in sql
+    # JOIN chunks must not wrap the ANN LIMIT (HNSW would be skipped).
+    dense_block = sql.split("dense_hits AS")[0]
+    assert "JOIN chunks" not in dense_block
+
+
+def test_undefined_function_detects_sqlstate():
+    err = Exception("missing")
+    err.sqlstate = "42883"
+    assert _undefined_function(err)
+    assert not _undefined_function(Exception("other"))
+
+
+def test_search_chunks_selects_sql_function(monkeypatch):
+    cur = _FakeCursor(rows=[
+        ("id0", "hello", "S", "a.pdf", 1, "", None, 0, "T", "en", 0.5, 1, None),
+    ])
+    conn = _FakeConn(cur)
+    monkeypatch.setattr(ChunkStore, "_connect", lambda self: conn)
+    rows = _store().search_chunks("q", [0.1, 0.2], k_dense=20, k_lexical=20, k_final=6)
+    assert "FROM search_chunks(" in cur.sql
+    assert "%s::vector" in cur.sql
+    assert rows[0][0] == "id0"
+    assert rows[0][1] == "hello"
+
+
+def test_search_chunks_retries_once_after_ensure_schema(monkeypatch):
+    class _Cur(_FakeCursor):
+        def execute(self, sql, params=None):
+            super().execute(sql, params)
+            if not getattr(self, "_ok", False):
+                self._ok = True
+                err = Exception("function search_chunks(text, vector) does not exist")
+                err.sqlstate = "42883"
+                raise err
+
+    cur = _Cur(rows=[("id0", "hello", "", "s", 1, "", None, 0, "", "", 0.1, 1, 2)])
+    conn = _FakeConn(cur)
+    store = _store()
+    monkeypatch.setattr(ChunkStore, "_connect", lambda self: conn)
+    called = {"n": 0}
+
+    def fake_schema(self):
+        called["n"] += 1
+
+    monkeypatch.setattr(ChunkStore, "ensure_schema", fake_schema)
+    rows = store.search_chunks("q", [0.0], k_final=6)
+    assert called["n"] == 1
+    assert rows[0][0] == "id0"

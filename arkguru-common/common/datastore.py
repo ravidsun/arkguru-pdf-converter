@@ -17,7 +17,8 @@ Why separate:
 Phase flow:
     Phase 1/2  -> upsert()             -> chunks table (vectors table stays empty)
     Phase 3    -> update_embeddings()  -> chunk_embeddings table
-    retrieve   -> search_dense()/search_lexical() (JOIN when dense)
+    retrieve   -> search_chunks() (SQL RRF of dense + lexical)
+                 search_dense()/search_lexical() remain for debugging a single leg
 
 Requires:  pip install "psycopg[binary]" pgvector
     export PG_DSN=postgresql://user:pass@localhost:5432/rag
@@ -155,6 +156,92 @@ def _dsn_with_defaults(dsn: str) -> str:
     return urlunparse(parsed._replace(query=urlencode(pairs)))
 
 
+def _undefined_function(exc: BaseException) -> bool:
+    """True when Postgres has not yet created ``search_chunks`` (SQLSTATE 42883)."""
+    if getattr(exc, "sqlstate", None) == "42883":
+        return True
+    return type(exc).__name__ == "UndefinedFunction"
+
+
+def _search_chunks_ddl(chunks: str, vectors: str) -> str:
+    """SQL function: HNSW-safe dense subquery + FTS, fused with RRF.
+
+    Dense reads *only* ``vectors`` with ``ORDER BY embedding <=> q LIMIT k`` so
+    the HNSW index is used. Do not JOIN ``chunks`` before that LIMIT.
+    Ranks are 1-based; ``1 / (rrf_k + rank)`` matches Python RRF at rank 0.
+    """
+    return f"""
+CREATE OR REPLACE FUNCTION search_chunks(
+  query_text      text,
+  query_embedding vector,
+  k_dense         int  DEFAULT 20,
+  k_lexical       int  DEFAULT 20,
+  k_final         int  DEFAULT 6,
+  rrf_k           int  DEFAULT 60,
+  filter_source_type text DEFAULT NULL,
+  filter_source_id   text DEFAULT NULL
+)
+RETURNS TABLE (
+  chunk_id text, text text, section text, source_id text,
+  page int, url text, parent_id text, chunk_index int,
+  title text, lang text,
+  rrf_score float4, dense_rank int, lexical_rank int
+)
+LANGUAGE sql
+STABLE
+AS $search$
+WITH dense AS (
+  SELECT v.chunk_id,
+         ROW_NUMBER() OVER (ORDER BY v.embedding <=> query_embedding)::int AS rnk
+  FROM {vectors} v
+  ORDER BY v.embedding <=> query_embedding
+  LIMIT k_dense
+),
+dense_hits AS (
+  SELECT d.chunk_id, d.rnk
+  FROM dense d
+  JOIN {chunks} c ON c.chunk_id = d.chunk_id
+  WHERE c.is_parent = false
+    AND (filter_source_type IS NULL OR c.source_type = filter_source_type)
+    AND (filter_source_id IS NULL OR c.source_id = filter_source_id)
+),
+lexical AS (
+  SELECT c.chunk_id,
+         ROW_NUMBER() OVER (
+           ORDER BY ts_rank(c.ts, plainto_tsquery('english', query_text)) DESC
+         )::int AS rnk
+  FROM {chunks} c
+  WHERE c.ts @@ plainto_tsquery('english', query_text)
+    AND c.is_parent = false
+    AND (filter_source_type IS NULL OR c.source_type = filter_source_type)
+    AND (filter_source_id IS NULL OR c.source_id = filter_source_id)
+  ORDER BY ts_rank(c.ts, plainto_tsquery('english', query_text)) DESC
+  LIMIT k_lexical
+),
+fused AS (
+  SELECT
+    COALESCE(d.chunk_id, l.chunk_id) AS chunk_id,
+    (COALESCE(1.0 / (rrf_k + d.rnk), 0.0)
+     + COALESCE(1.0 / (rrf_k + l.rnk), 0.0)) AS score,
+    d.rnk AS dense_rank,
+    l.rnk AS lexical_rank
+  FROM dense_hits d
+  FULL OUTER JOIN lexical l ON d.chunk_id = l.chunk_id
+)
+SELECT
+  c.chunk_id, c.text, c.section, c.source_id, c.page, c.url,
+  c.parent_id, c.chunk_index, c.title, c.lang,
+  f.score::float4 AS rrf_score,
+  f.dense_rank,
+  f.lexical_rank
+FROM fused f
+JOIN {chunks} c ON c.chunk_id = f.chunk_id
+ORDER BY f.score DESC
+LIMIT k_final;
+$search$;
+"""
+
+
 def _migrate_chunk_columns(cur, table: str) -> None:
     """Add any missing ``chunks`` columns and make ``chunk_index`` NOT NULL.
 
@@ -267,6 +354,7 @@ class ChunkStore:
                 );""")
             cur.execute(f"CREATE INDEX IF NOT EXISTS {self.vectors}_hnsw_idx "
                         f"ON {self.vectors} USING hnsw (embedding vector_cosine_ops);")
+            cur.execute(_search_chunks_ddl(self.chunks, self.vectors))
             conn.commit()
             for t in (self.chunks, self.vectors):
                 log.info("datastore table '%s': %s", t,
@@ -434,6 +522,50 @@ class ChunkStore:
             return out
 
     # -- search (Phase 3 retrieval) ---------------------------------------
+    def search_chunks(
+        self,
+        query_text: str,
+        query_embedding,
+        *,
+        k_dense: int = 20,
+        k_lexical: int = 20,
+        k_final: int = 6,
+        rrf_k: int = 60,
+        source_type: Optional[str] = None,
+        source_id: Optional[str] = None,
+        _retried: bool = False,
+    ) -> list[tuple]:
+        """Hybrid retrieve: one round trip through SQL ``search_chunks``.
+
+        Caller embeds ``query_text``. Rerank and parent expansion stay in Python.
+        If the SQL function is missing, ``ensure_schema()`` runs once and the
+        SELECT is retried.
+        """
+        vec = "[" + ",".join(str(float(x)) for x in query_embedding) + "]"
+        sql = (
+            "SELECT * FROM search_chunks("
+            "%s, %s::vector, %s, %s, %s, %s, %s, %s)"
+        )
+        params = (
+            query_text, vec, k_dense, k_lexical, k_final, rrf_k,
+            source_type, source_id,
+        )
+        try:
+            with self._connect() as conn, conn.cursor() as cur:
+                cur.execute(sql, params)
+                return cur.fetchall()
+        except Exception as e:
+            if _retried or not _undefined_function(e):
+                raise
+            log.info("search_chunks missing; ensure_schema() then retry")
+            self.ensure_schema()
+            return self.search_chunks(
+                query_text, query_embedding,
+                k_dense=k_dense, k_lexical=k_lexical, k_final=k_final,
+                rrf_k=rrf_k, source_type=source_type, source_id=source_id,
+                _retried=True,
+            )
+
     def search_dense(self, qvec, k: int = 20) -> list[tuple]:
         """Cosine NN over the vectors table, JOINed back to chunk text/metadata."""
         cols = ",".join(f"c.{x}" for x in _HIT_COLS)

@@ -11,6 +11,7 @@
 
 - [docs/LOCAL_RUN.md](docs/LOCAL_RUN.md) — laptop / NUC / workstation (venv, file sink, optional Postgres + Ollama)
 - [docs/CLOUD_RUN.md](docs/CLOUD_RUN.md) — Cursor Cloud Agent (`.cursor/environment.json` + `scripts/setup_dev_env.sh`)
+- Hybrid retrieve implementation: [`arkguru-common/common/datastore.py`](arkguru-common/common/datastore.py) — `ensure_schema()` installs SQL `search_chunks()`
 
 ---
 
@@ -483,4 +484,5 @@ A: Phase 3 includes `eval_ragas.py`, which computes context precision/recall/fai
 - [Phase 3 README](arkguru-rag-slm/README.md) — fine-tuning, retrieval, serving, evaluation
 - [Database setup](docs/DATABASE_SETUP.md) — Postgres + pgvector: native, Docker, hosted
 - [Hybrid retrieve](docs/DATABASE_SETUP.md#hybrid-retrieve) — SQL `search_chunks()` from `ensure_schema()`
+- [`arkguru-common/common/datastore.py`](arkguru-common/common/datastore.py) — `ensure_schema()` + `CREATE FUNCTION search_chunks`
 - [compose.yaml](compose.yaml) — local / VPS `pgvector/pgvector:pg16`
