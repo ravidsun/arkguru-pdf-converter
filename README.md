@@ -32,7 +32,7 @@
       │  Phase 3: arkguru-rag-slm            │
       │  - Combine + deduplicate             │
       │  - Fine-tune small LM (LoRA)         │
-      │  - Index + retrieve (SQL search_chunks)│
+      │  - Index + SQL search_chunks()       │
       │  - Serve via Ollama                  │
       └──────────┬──────────────────────────┘
                  │
@@ -180,10 +180,10 @@ bash scripts/setup_docker_pg.sh
 # Create extension (run once; the app also does this):
 psql "$PG_DSN" -c "CREATE EXTENSION IF NOT EXISTS vector;"
 
-# Tables are auto-created by Phase 1, Phase 2, or Phase 3 on first run
+# Tables + search_chunks() are created by ensure_schema() on first write
 ```
 
-Switch hosts by changing `PG_DSN` only. The host must be PostgreSQL 14+ with pgvector.
+Switch hosts by changing `PG_DSN` only. The host must be PostgreSQL 14+ with pgvector. `ensure_schema()` also installs the SQL function `search_chunks()` used for hybrid retrieve.
 
 See [docs/DATABASE_SETUP.md](docs/DATABASE_SETUP.md), [docs/LOCAL_RUN.md](docs/LOCAL_RUN.md#switch-database-pg_dsn), or [compose.yaml](compose.yaml).
 
@@ -222,6 +222,8 @@ make serve
 # assistant> ... [sample_handbook.pdf p.1]
 ```
 
+With `PG_DSN` set, `serve.py` / `retrieve.py` call `ChunkStore.search_chunks` (SQL RRF of HNSW cosine + GIN full-text, `is_parent = false`), then rerank and expand parents in Python. Without a DSN, file/npz mode keeps Python RRF.
+
 #### 6. Evaluate quality (RAGAS)
 
 ```bash
@@ -238,7 +240,7 @@ make eval
 | `embed_datastore.py` | Embed chunks already in Postgres | `chunks` missing vectors | `chunk_embeddings` + HNSW |
 | `index.py` | Upsert a JSONL corpus **into Postgres**, then embed | corpus.jsonl + `PG_DSN` | `chunks` + `chunk_embeddings` |
 | `vector_store.py` / `run_pdfs` | Local incremental index (no DB) | Phase 1 JSONL | `data/store/index.{npz,jsonl}` |
-| `retrieve.py` | Hybrid retrieve: SQL `search_chunks` (HNSW + FTS RRF) when `PG_DSN` is set; Python RRF for files; then rerank | corpus/pgvector + query | top-k ranked chunks |
+| `retrieve.py` | Hybrid retrieve: SQL `search_chunks()` (HNSW + FTS RRF) when `PG_DSN` is set; Python RRF for files; then rerank + parent expand | corpus/pgvector + query | top-k ranked chunks |
 | `serve.py` | Chat via Ollama, or extractive fallback + faithfulness gate | query + index | grounded answer + sources |
 | `backup.py` | `pg_dump` of both tables when `created_at` watermark moved | Postgres | `data/backups/*.dump` |
 | `eval_ragas.py` | Evaluate retrieval + generation quality | golden_qa.jsonl + system | RAGAS metrics |
@@ -272,6 +274,16 @@ serve:
 **Embedder choices:**
 - `hashing`: Offline testing (no downloads, deterministic, low quality)
 - `sentence_transformer`: Production (SOTA, ~100–300 queries/s CPU)
+
+### Hybrid retrieve (`search_chunks`)
+
+When `PG_DSN` is set, Phase 3 retrieve is **one SQL function**, `search_chunks()`, created by `ensure_schema()` in `common/datastore.py` (not a hand-written schema file). It fuses:
+
+- **Dense:** HNSW cosine on `chunk_embeddings` (`ORDER BY embedding <=> q LIMIT k_dense`)
+- **Lexical:** GIN `ts` on `chunks` (`ts @@ plainto_tsquery` + `ts_rank`)
+- **RRF:** `1 / (rrf_k + rank)` with `rrf_k=60`, both legs `is_parent = false`
+
+Python still embeds the query, reranks with `BAAI/bge-reranker-base`, and expands parent chunks. File/npz mode (`run_pdfs` / `quickstart`) keeps Python `reciprocal_rank_fusion`. See [docs/DATABASE_SETUP.md](docs/DATABASE_SETUP.md#hybrid-retrieve).
 
 ---
 
@@ -371,7 +383,7 @@ Serve via Ollama (local LLM)
 2. Once satisfied, spin up Postgres + pgvector (Path B)
 3. Phase 1/2 re-run with `--sink postgres` → upsert to DB
 4. Phase 3 switches config to read from DB
-5. Queries scale, no reprocessing of PDFs/web
+5. `search_chunks()` hybrid retrieve scales, no reprocessing of PDFs/web
 
 ---
 
@@ -430,7 +442,10 @@ MIT (each repo independently licensed)
 ## FAQ
 
 **Q: Do I need Postgres?**  
-A: No. Start with local files (`data/store/*.jsonl`). Postgres is optional for scale (>100K chunks) and team sharing.
+A: No. Start with local files (`data/store/*.jsonl`). Postgres is optional for scale (>100K chunks) and team sharing. File mode uses Python RRF; Postgres mode uses SQL `search_chunks()`.
+
+**Q: How does hybrid retrieve work with Postgres?**  
+A: `ensure_schema()` installs `search_chunks()`. With `PG_DSN` set, `retrieve.py` / `serve.py` embed the query, call that function (HNSW + GIN FTS fused with RRF), then rerank and expand parents in Python. If the function is missing, `ChunkStore.search_chunks` runs `ensure_schema()` once and retries.
 
 **Q: Can I use Neon / RDS / a local Docker DB instead of Supabase?**  
 A: Yes, if it is PostgreSQL 14+ with pgvector. Native local is port 5432; Docker compose is port 5433. Run `bash scripts/setup_docker_pg.sh` (one-click Docker) or `bash scripts/detect_local_pg.sh`, or set `PG_DSN` (see [docs/DATABASE_SETUP.md](docs/DATABASE_SETUP.md)).
