@@ -30,13 +30,9 @@ git clone https://github.com/ravidsun/arkguru-rag-slm.git
 
 Python 3.9+ is required. On Debian/Ubuntu also install `python3-venv` (and `python3-pip` if needed).
 
-Optional system packages for scanned PDFs and figure OCR:
+OCR for scanned PDFs is installed by `scripts/setup_dev_env.sh` on Debian/Ubuntu (`tesseract-ocr`, `tesseract-ocr-eng`, `ghostscript`, plus pip `ocrmypdf` / `pytesseract` / `pillow`). On macOS install the system tools yourself:
 
 ```bash
-# Ubuntu/Debian
-sudo apt-get install tesseract-ocr ghostscript
-
-# macOS
 brew install tesseract ghostscript
 ```
 
@@ -54,7 +50,7 @@ The script is idempotent. It:
 
 1. Creates `.venv` in this repo (override with `ARKGURU_VENV`). On Debian/Ubuntu it installs `python3-venv` if `ensurepip` is missing.
 2. Installs `arkguru-common` from the sibling checkout when present, otherwise the vendored copy (`import common` works in every phase), including the **`postgres` extra** (`psycopg`, `pgvector`).
-3. Installs Phase 1 requirements plus `reportlab` (sample PDF fixture) and Postgres clients, and Phase 2 requirements if that repo is checked out.
+3. Installs Phase 1 requirements plus `reportlab`, Postgres clients, and OCR (`ocrmypdf`, `pytesseract`, `pillow`). On Debian/Ubuntu it also installs system Tesseract and Ghostscript. Phase 2 requirements if that repo is checked out.
 4. Installs the **offline** Phase 3 core (`numpy`, `rank-bm25`) so retrieval works without downloading models.
 
 The virtualenv lives in `arkguru-pdf-converter/.venv`. Activate it before running any phase.
@@ -257,7 +253,7 @@ python -m phase3_rag.serve
 |---|---|
 | `ModuleNotFoundError: common` | Activate `.venv` created by `scripts/setup_dev_env.sh`, or `pip install -e arkguru-common` |
 | Phase repo not found during setup | Clone it as a **sibling** of `arkguru-pdf-converter` |
-| Empty Phase 1 output | Scanned PDF — install tesseract/ghostscript and set `ocr_enabled: true` |
+| Empty Phase 1 output | Scanned PDF — confirm `tesseract --version` and `ocr_enabled: true` (setup installs OCR on Debian/Ubuntu) |
 | Blank Phase 2 pages | JS site — switch to `backend: firecrawl` |
 | Ollama errors | Start `ollama serve`; extractive answers still work without it |
 | Slow / OOM on fine-tune | Stay on `--embedder hashing` for plumbing tests; reduce LoRA rank / batch size for real training |

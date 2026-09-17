@@ -54,9 +54,9 @@
 
 **Key features:**
 - **Three extraction backends:** pymupdf4llm (default, fast), docling (complex tables), pymupdf (fallback)
-- **Scanned PDF OCR:** Detects image-only pages and OCRs them in-place; native text layers untouched
+- **Scanned PDF OCR:** `ocrmypdf` + Tesseract on image-only pages (`skip_text`, native layers untouched). `setup_dev_env.sh` installs the Python libs and, on Debian/Ubuntu, `tesseract-ocr` + `ghostscript`.
 - **Table extraction:** Preserves structure (rows, columns) as standalone markdown chunks
-- **Figure OCR:** Extracts text from diagrams/charts (axis labels, legends)
+- **Figure OCR:** `pytesseract` extracts text from diagrams/charts (axis labels, legends)
 - **Three chunking strategies:** `structure` (default, heading windows), `parent_child` (long parent + small children). `semantic` is a CLI/config value but Phase 1 does not pass an embedder, so it uses the same windows as `structure`.
 
 **Example workflow:**
@@ -78,15 +78,16 @@ ocr_enabled: true         # safe on mixed documents
 extract_figures: true     # OCR text in images
 ```
 
-**System dependencies (optional OCR):**
+**System dependencies (OCR, installed by `setup_dev_env.sh` on Debian/Ubuntu):**
 ```bash
-# macOS
+# Already done by bash scripts/setup_dev_env.sh when apt-get is available:
+#   tesseract-ocr tesseract-ocr-eng ghostscript
+# plus pip: ocrmypdf pytesseract pillow
+
+# macOS (setup does not brew-install these):
 brew install tesseract ghostscript
 
-# Ubuntu/Debian
-sudo apt-get install tesseract-ocr ghostscript
-
-# Windows: Download from GitHub + Ghostscript website, add to PATH
+# Windows: Download Tesseract + Ghostscript, add to PATH
 ```
 
 ---

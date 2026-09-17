@@ -50,6 +50,19 @@ ensure_venv_packages() {
   sudo apt-get install -y python3-venv python3-pip
 }
 
+ensure_ocr_packages() {
+  if command -v tesseract >/dev/null 2>&1 && command -v gs >/dev/null 2>&1; then
+    return 0
+  fi
+  if ! command -v apt-get >/dev/null 2>&1; then
+    log "WARNING: tesseract/ghostscript missing and apt-get is not available. Scanned-PDF OCR will be skipped."
+    return 0
+  fi
+  log "Installing tesseract-ocr, tesseract-ocr-eng, and ghostscript for ocrmypdf"
+  sudo apt-get update -qq
+  sudo apt-get install -y tesseract-ocr tesseract-ocr-eng ghostscript
+}
+
 venv_usable() {
   [ -x "$VENV_DIR/bin/python" ] && "$VENV_DIR/bin/python" -m pip --version >/dev/null 2>&1
 }
@@ -57,6 +70,7 @@ venv_usable() {
 # --- 1. Python virtualenv ---------------------------------------------------
 log "Creating virtualenv at $VENV_DIR"
 ensure_venv_packages
+ensure_ocr_packages
 if ! venv_usable; then
   rm -rf "$VENV_DIR"
   python3 -m venv "$VENV_DIR"
@@ -92,8 +106,10 @@ for name in "${PHASES[@]}"; do
   if repo="$(find_phase "$name")"; then
     case "$name" in
       # Phase 1 needs reportlab to generate the built-in sample PDF fixture,
-      # plus psycopg/pgvector for --sink postgres (also pulled by common[postgres]).
-      arkguru-pdf-extraction) install_reqs "$repo" "reportlab>=4.0" "psycopg[binary]>=3.2" "pgvector>=0.3" ;;
+      # plus psycopg/pgvector for --sink postgres (also pulled by common[postgres]),
+      # plus ocrmypdf/pytesseract/pillow even if an old extraction checkout still
+      # comments those lines.
+      arkguru-pdf-extraction) install_reqs "$repo" "reportlab>=4.0" "psycopg[binary]>=3.2" "pgvector>=0.3" "ocrmypdf>=16.0" "pytesseract>=0.3.10" "pillow>=10.0" ;;
       # Phase 3's full requirements.txt pulls a heavy ML/serving stack
       # (transformers, sentence-transformers, FlagEmbedding, ragas, llama-index,
       # ...). For a lean, offline-capable dev environment we install only the
