@@ -56,6 +56,16 @@ server is already running and you only need `.env` written.
 
 ---
 
+## Hybrid retrieve
+
+When `PG_DSN` is set, Phase 3 retrieve is one SQL function, `search_chunks()`,
+created by `ensure_schema()` in `common/datastore.py` (not a hand-written SQL
+file). It fuses HNSW cosine on `chunk_embeddings` with GIN `ts` on `chunks`
+using reciprocal rank fusion (`is_parent = false` on both legs). Python still
+embeds the query, reranks, and expands parents. File/npz mode keeps Python RRF.
+
+---
+
 ## Detect local native vs Docker
 
 If a native cluster and Docker compose can both exist on one machine, they use
@@ -362,7 +372,9 @@ python -m phase1_pdf.pipeline --init-db
 
 ## Operating notes
 
-- **Tables are auto-managed.** `ensure_schema()` is idempotent on every write path.
+- **Tables are auto-managed.** `ensure_schema()` is idempotent on every write path
+  and installs `search_chunks()` (hybrid retrieve). Do not put that function in a
+  hand-written schema file.
 - **Re-embed with a new model:** `TRUNCATE chunk_embeddings;` then re-run
   `phase3_rag.embed_datastore`. If `dim` changes, update `config/datastore.yaml`
   and drop/recreate `chunk_embeddings` (vector width is fixed at create).
