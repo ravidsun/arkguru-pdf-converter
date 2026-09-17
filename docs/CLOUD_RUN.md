@@ -113,7 +113,7 @@ Omit `--sink postgres` to write JSONL under `data/processed/` instead.
 
 The Cloud `install` script matches the **offline** local bootstrap:
 
-- `arkguru-common` (schema, tokenizer, chunking, datastore, worker, RRF) + pytest + **postgres extra** (`psycopg`, `pgvector`)
+- `arkguru-common` (schema, tokenizer, chunking, datastore/`search_chunks`, worker, Python RRF for file mode) + pytest + **postgres extra** (`psycopg`, `pgvector`)
 - Phase 1: pymupdf / pymupdf4llm, tiktoken, reportlab (sample PDF), `psycopg` / `pgvector` for `--sink postgres`
 - Phase 2 (only if that repo is checked out): httpx, trafilatura, datasketch, …
 - Phase 3 core only: numpy + rank-bm25
@@ -125,7 +125,8 @@ The Cloud `install` script matches the **offline** local bootstrap:
 - A Postgres **server** (Python `psycopg` / `pgvector` clients **are** installed via `arkguru-common[postgres]`)
 - Ollama / llama.cpp
 
-Retrieval still works: `--embedder hashing` plus BM25, with extractive answers when Ollama is absent.
+Retrieval still works: `--embedder hashing` plus file-mode BM25, or SQL
+`search_chunks()` when `PG_DSN` is set, with extractive answers when Ollama is absent.
 
 To add the full Phase 3 stack in a Cloud session:
 

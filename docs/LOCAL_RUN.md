@@ -119,7 +119,7 @@ Or the autonomous file-mode orchestrator (ingest PDFs, then answer from JSONL + 
 make e2e
 ```
 
-`make e2e` asks *"What does error code E14 mean?"* against the sample handbook. If Ollama is not running, the answer is extractive (top retrieved passage).
+`make e2e` asks *"What does error code E14 mean?"* against the sample handbook. If Ollama is not running, the answer is extractive (top retrieved passage). With `PG_DSN` set, `make serve` uses SQL `search_chunks()` instead of the JSONL/BM25 path.
 
 ## Switch database (`PG_DSN`)
 

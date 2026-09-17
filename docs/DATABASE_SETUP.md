@@ -288,7 +288,8 @@ python -m phase3_rag.serve
 ```
 
 `phase3_rag.serve` is **fail-closed**: if `PG_DSN` is set and connect fails, it
-**raises**. JSONL retrieve is used only when no DSN is configured.
+**raises**. Retrieve is SQL `search_chunks()`. JSONL retrieve is used only when
+no DSN is configured.
 
 **Daily backup** (custom-format dump of both tables when the `created_at`
 watermark moved). Requires `pg_dump`:

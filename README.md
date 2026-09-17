@@ -32,7 +32,7 @@
       │  Phase 3: arkguru-rag-slm            │
       │  - Combine + deduplicate             │
       │  - Fine-tune small LM (LoRA)         │
-      │  - Index + retrieve (pgvector)       │
+      │  - Index + retrieve (SQL search_chunks)│
       │  - Serve via Ollama                  │
       └──────────┬──────────────────────────┘
                  │
@@ -238,7 +238,7 @@ make eval
 | `embed_datastore.py` | Embed chunks already in Postgres | `chunks` missing vectors | `chunk_embeddings` + HNSW |
 | `index.py` | Upsert a JSONL corpus **into Postgres**, then embed | corpus.jsonl + `PG_DSN` | `chunks` + `chunk_embeddings` |
 | `vector_store.py` / `run_pdfs` | Local incremental index (no DB) | Phase 1 JSONL | `data/store/index.{npz,jsonl}` |
-| `retrieve.py` | Hybrid search (dense + BM25) + reranking | corpus/pgvector + query | top-k ranked chunks |
+| `retrieve.py` | Hybrid retrieve: SQL `search_chunks` (HNSW + FTS RRF) when `PG_DSN` is set; Python RRF for files; then rerank | corpus/pgvector + query | top-k ranked chunks |
 | `serve.py` | Chat via Ollama, or extractive fallback + faithfulness gate | query + index | grounded answer + sources |
 | `backup.py` | `pg_dump` of both tables when `created_at` watermark moved | Postgres | `data/backups/*.dump` |
 | `eval_ragas.py` | Evaluate retrieval + generation quality | golden_qa.jsonl + system | RAGAS metrics |
@@ -356,7 +356,7 @@ Phase 2 URLs ↗
        ↓
 Phase 3 fills embeddings (chunk_embeddings table)
        ↓
-Retrieval queries both tables (joined on chunk_id)
+Retrieval: search_chunks() (SQL RRF of HNSW + GIN FTS)
        ↓
 Serve via Ollama (local LLM)
 ```
