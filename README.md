@@ -482,4 +482,5 @@ A: Phase 3 includes `eval_ragas.py`, which computes context precision/recall/fai
 - [Phase 2 README](arkguru-web-scraping/README.md) — crawl, extract, near-dedup logic
 - [Phase 3 README](arkguru-rag-slm/README.md) — fine-tuning, retrieval, serving, evaluation
 - [Database setup](docs/DATABASE_SETUP.md) — Postgres + pgvector: native, Docker, hosted
+- [Hybrid retrieve](docs/DATABASE_SETUP.md#hybrid-retrieve) — SQL `search_chunks()` from `ensure_schema()`
 - [compose.yaml](compose.yaml) — local / VPS `pgvector/pgvector:pg16`
