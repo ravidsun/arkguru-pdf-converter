@@ -237,16 +237,18 @@ $envFile = Join-Path $repoRoot '.env'
 ) | Set-Content -Path $envFile -Encoding ascii
 Write-Log "wrote $envFile"
 
-Write-Host ''
-Write-Host 'Connection (native Windows PostgreSQL)'
-Write-Host "  host:      $HostName"
-Write-Host "  port:      $Port"
-Write-Host "  database:  $AppDb"
-Write-Host "  user:      $AppUser"
-Write-Host "  password:  $AppPassword"
-Write-Host "  PG_DSN:    $Dsn"
-Write-Host "  psql:      `"$psql`" `"$Dsn`""
-Write-Host ''
-Write-Host 'Verify:'
-Write-Host "  `"$psql`" `"$Dsn`" -c `"SELECT version();\""
-Write-Host "  `"$psql`" `"$Dsn`" -c `"SELECT extname, extversion FROM pg_extension WHERE extname='vector';`""
+Write-Host @"
+
+Connection (native Windows PostgreSQL)
+  host:      $HostName
+  port:      $Port
+  database:  $AppDb
+  user:      $AppUser
+  password:  $AppPassword
+  PG_DSN:    $Dsn
+  psql:      $psql $Dsn
+
+Verify:
+  $psql "$Dsn" -c "SELECT version();"
+  $psql "$Dsn" -c "SELECT extname, extversion FROM pg_extension WHERE extname='vector';"
+"@
