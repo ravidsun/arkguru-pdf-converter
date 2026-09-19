@@ -13,10 +13,12 @@
   5. CREATE EXTENSION vector (needs pgvector; see the printed nmake steps if this fails)
   6. Writes gitignored .env with PG_DSN
 
-  Run in an elevated PowerShell (Windows PC, not Cloud Agent):
+  Windows often blocks .ps1 files (execution policy). Use one of:
 
-    Set-ExecutionPolicy -Scope Process Bypass
-    .\setup_windows_pg.ps1
+    .\setup_windows_pg.cmd
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\setup_windows_pg.ps1
+
+  Prefer an elevated PowerShell (Right-click -> Run as administrator).
 
   If this file lives in arkguru-pdf-converter\scripts, .env is written to the repo
   root. If you downloaded the script alone, .env is written to the current directory.
