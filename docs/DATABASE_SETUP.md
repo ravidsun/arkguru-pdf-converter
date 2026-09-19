@@ -171,6 +171,45 @@ git clone --depth 1 https://github.com/pgvector/pgvector.git
 cd pgvector && make && sudo make install
 ```
 
+A fresh native install (Windows `setup_windows_pg.ps1`, apt, or Homebrew) has
+**schema-ready but empty** tables until you ingest PDFs or restore the portable
+dump. Hosted `PG_DSN` (Supabase / Neon) can also be a **smaller subset**. The
+complete 2026-09-15 snapshot is 60 PDF sources / 109163 chunks /
+109163 embeddings (`vector` + HNSW + GIN).
+
+```bash
+# Linux / macOS / Cloud Agent — default target 127.0.0.1:5432/rag
+bash scripts/restore_rag_dump.sh
+# Docker compose on 5433:
+# bash scripts/restore_rag_dump.sh --port 5433
+```
+
+```powershell
+# Windows native (after setup_windows_pg.cmd so pgvector exists)
+.\scripts\restore_rag_dump.cmd
+```
+
+The script downloads
+`https://filebin.net/arkguru-complete/arkguru_rag_complete_20260915.dump`
+when the file is not already on disk, checks
+`sha256=90b21d209c211b48378cf951e349c8ea954cd65f4804385d654659c4d222968c`,
+runs `pg_restore --no-owner --no-acl`, and fails if counts do not match.
+It refuses a non-loopback target unless you pass `--force-remote`. To copy a
+**live** other database instead of the portable dump:
+
+```bash
+bash scripts/restore_rag_dump.sh --from-dsn "$OTHER_PG_DSN"
+```
+
+Expected after a portable restore:
+
+```bash
+psql "$PG_DSN" -c "SELECT count(*) FROM chunks;"
+psql "$PG_DSN" -c "SELECT count(*) FROM chunk_embeddings;"
+psql "$PG_DSN" -c "SELECT count(DISTINCT source_id) FROM chunks;"
+# 109163 / 109163 / 60
+```
+
 Cloud Agent VMs can use `arkguru-common/scripts/start_services.sh`, which
 creates role/db `arkguru` on **5432**:
 
@@ -393,5 +432,6 @@ python -m phase1_pdf.pipeline --init-db
 - [compose.yaml](../compose.yaml) — local Docker pgvector
 - [scripts/setup_docker_pg.sh](../scripts/setup_docker_pg.sh) — one-click pull, start, write `PG_DSN`
 - [scripts/detect_local_pg.sh](../scripts/detect_local_pg.sh) — pick native vs Docker if already running
+- [scripts/restore_rag_dump.sh](../scripts/restore_rag_dump.sh) — load the portable 60-source dump (Windows: `restore_rag_dump.cmd`)
 - [LOCAL_RUN.md](LOCAL_RUN.md) — full local pipeline
 - [CLOUD_RUN.md](CLOUD_RUN.md) — Cloud Agent + hosted `PG_DSN`

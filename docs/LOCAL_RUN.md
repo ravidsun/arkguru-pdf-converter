@@ -134,6 +134,14 @@ export PG_DSN=postgresql://arkguru:arkguru@127.0.0.1:5432/arkguru
 # or: export PG_DSN=postgresql://rag:change-me@127.0.0.1:5432/rag
 ```
 
+A new local cluster does **not** include the PDF corpus. Restore the portable
+dump (60 sources / 109163 chunks + embeddings) after Postgres + pgvector are up:
+
+```bash
+bash scripts/restore_rag_dump.sh
+# Windows:  .\scripts\restore_rag_dump.cmd
+```
+
 **Local Docker** — one-click pull + start + `.env` ([compose.yaml](../compose.yaml), host port **5433**):
 
 ```bash

@@ -183,6 +183,10 @@ bash scripts/setup_docker_pg.sh
 psql "$PG_DSN" -c "CREATE EXTENSION IF NOT EXISTS vector;"
 
 # Tables + search_chunks() are created by ensure_schema() on first write
+
+# Load the portable corpus (60 sources / 109163 chunks) into empty local rag:
+bash scripts/restore_rag_dump.sh
+# Windows: .\scripts\restore_rag_dump.cmd
 ```
 
 Switch hosts by changing `PG_DSN` only. The host must be PostgreSQL 14+ with pgvector. `ensure_schema()` also installs the SQL function `search_chunks()` used for hybrid retrieve.
