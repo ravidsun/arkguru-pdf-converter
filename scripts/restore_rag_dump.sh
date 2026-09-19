@@ -156,9 +156,18 @@ fi
 log "restoring ${DUMP_PATH}"
 if command -v sudo >/dev/null && id postgres >/dev/null 2>&1 && [ -z "$SUPER_PASSWORD" ]; then
   sudo -u postgres pg_restore --no-owner --no-acl --clean --if-exists -d "$DB_NAME" "$DUMP_PATH"
+  sudo -u postgres psql -d "$DB_NAME" -v ON_ERROR_STOP=1 -c \
+    "GRANT ALL ON SCHEMA public TO ${USER_NAME};
+     GRANT ALL ON ALL TABLES IN SCHEMA public TO ${USER_NAME};
+     GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO ${USER_NAME};
+     ALTER TABLE IF EXISTS chunks OWNER TO ${USER_NAME};
+     ALTER TABLE IF EXISTS chunk_embeddings OWNER TO ${USER_NAME};"
 else
   "${restore_env[@]}" pg_restore --no-owner --no-acl --clean --if-exists --dbname="$super_dsn" "$DUMP_PATH" \
     || "${restore_env[@]}" pg_restore --no-owner --no-acl --clean --if-exists --dbname="$TARGET_DSN" "$DUMP_PATH"
+  grant_sql="GRANT ALL ON SCHEMA public TO ${USER_NAME}; GRANT ALL ON ALL TABLES IN SCHEMA public TO ${USER_NAME}; GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO ${USER_NAME}; ALTER TABLE IF EXISTS chunks OWNER TO ${USER_NAME}; ALTER TABLE IF EXISTS chunk_embeddings OWNER TO ${USER_NAME};"
+  "${restore_env[@]}" psql "$super_dsn" -v ON_ERROR_STOP=1 -c "$grant_sql" \
+    || "${restore_env[@]}" psql "$TARGET_DSN" -v ON_ERROR_STOP=1 -c "$grant_sql" || true
 fi
 
 verify_sql='

@@ -14,6 +14,7 @@ def test_bash_restore_pins_complete_dump():
     assert "EXPECTED_SOURCES=60" in text
     assert "filebin.net/arkguru-complete" in text
     assert "--force-remote" in text
+    assert "GRANT ALL ON ALL TABLES IN SCHEMA public" in text
 
 
 def test_windows_restore_pins_complete_dump():
@@ -23,6 +24,7 @@ def test_windows_restore_pins_complete_dump():
     assert "ExpectedEmbeddings = 109163" in text
     assert "ExpectedSources = 60" in text
     assert "restore_rag_dump.cmd" in text
+    assert "GRANT ALL ON ALL TABLES IN SCHEMA public" in text
 
 
 def test_windows_cmd_launcher_bypasses_execution_policy():

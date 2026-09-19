@@ -142,6 +142,18 @@ Invoke-PgTool -Exe $pgRestore -Password $SuperPassword -Arguments @(
     $DumpPath
 ) | Out-Null
 
+$grantSql = @"
+GRANT ALL ON SCHEMA public TO $AppUser;
+GRANT ALL ON ALL TABLES IN SCHEMA public TO $AppUser;
+GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO $AppUser;
+ALTER TABLE IF EXISTS chunks OWNER TO $AppUser;
+ALTER TABLE IF EXISTS chunk_embeddings OWNER TO $AppUser;
+"@
+Invoke-PgTool -Exe $psql -Password $SuperPassword -Arguments @(
+    '-h', $HostName, '-p', "$Port", '-U', $SuperUser, '-d', $AppDb,
+    '-v', 'ON_ERROR_STOP=1', '-c', $grantSql
+) | Out-Null
+
 $countSql = 'SELECT count(*)::text FROM chunks UNION ALL SELECT count(*)::text FROM chunk_embeddings UNION ALL SELECT count(DISTINCT source_id)::text FROM chunks;'
 $counts = Invoke-PgTool -Exe $psql -Password $AppPassword -Arguments @(
     '-h', $HostName, '-p', "$Port", '-U', $AppUser, '-d', $AppDb,
