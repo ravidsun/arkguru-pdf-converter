@@ -29,6 +29,9 @@ def test_windows_restore_pins_complete_dump():
     assert "curl.exe" in text
     assert "user-agent" in text
     assert "6ba1004fd99133af779ba7ce1c66465a0cbc2834b755145c4a8e088250c872db" in text
+    assert "Install-PgvectorWindows" in text
+    assert "vector.v0.8.6-pg16.zip" in text
+    assert "vector.control" in text
 
 
 def test_windows_cmd_launcher_bypasses_execution_policy():

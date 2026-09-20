@@ -28,7 +28,8 @@ param(
     [int]$Port = 5432,
     [string]$AppUser = 'rag',
     [string]$AppPassword = 'change-me',
-    [string]$AppDb = 'rag'
+    [string]$AppDb = 'rag',
+    [string]$PgvectorVersion = '0.8.6'
 )
 
 Set-StrictMode -Version Latest
@@ -50,6 +51,12 @@ function Convert-NativeOutput {
         else { [string]$item }
     }
     return ($parts -join "`n").Trim()
+}
+
+function Test-IsAdministrator {
+    $id = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = New-Object Security.Principal.WindowsPrincipal($id)
+    return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
 function Find-PgExe {
@@ -162,6 +169,46 @@ if (-not $DumpPath) {
     $DumpPath = Join-Path $env:TEMP 'arkguru_rag_complete_20260915.dump'
 }
 
+function Install-PgvectorWindows {
+    param(
+        [Parameter(Mandatory = $true)][string]$Root,
+        [Parameter(Mandatory = $true)][string]$Version
+    )
+    $url = "https://github.com/andreiramani/pgvector_pgsql_windows/releases/download/${Version}_16/vector.v${Version}-pg16.zip"
+    $zip = Join-Path $env:TEMP "vector.v${Version}-pg16.zip"
+    $extract = Join-Path $env:TEMP "pgvector-win-pg16"
+    Write-Log "downloading unofficial Windows pgvector $Version"
+    Write-Log $url
+    $curl = Get-Command curl.exe -ErrorAction SilentlyContinue
+    if ($curl) {
+        $prevEap = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        & $curl.Source @('-L', '--fail', '--retry', '3', '--user-agent', 'curl/8.5.0', '-o', $zip, $url)
+        $code = $LASTEXITCODE
+        if ($null -eq $code) { $code = 0 }
+        $ErrorActionPreference = $prevEap
+        if ($code -ne 0) { throw "curl.exe failed ($code) downloading $url" }
+    }
+    else {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        $wc = New-Object System.Net.WebClient
+        $wc.Headers.Add('User-Agent', 'curl/8.5.0')
+        $wc.DownloadFile($url, $zip)
+    }
+    if (Test-Path -LiteralPath $extract) {
+        Remove-Item -LiteralPath $extract -Recurse -Force
+    }
+    Expand-Archive -LiteralPath $zip -DestinationPath $extract -Force
+    $dll = Get-ChildItem -Path $extract -Recurse -Filter 'vector.dll' | Select-Object -First 1
+    if (-not $dll) { throw "pgvector zip did not contain vector.dll: $zip" }
+    $packRoot = $dll.Directory.Parent.FullName
+    $libDest = Join-Path $Root 'lib'
+    $extDest = Join-Path $Root 'share\extension'
+    Copy-Item -LiteralPath $dll.FullName -Destination (Join-Path $libDest 'vector.dll') -Force
+    Copy-Item -Path (Join-Path $packRoot 'share\extension\*') -Destination $extDest -Force
+    Write-Log "installed vector.dll and vector.control into $Root"
+}
+
 Get-PortableDump -Path $DumpPath -Url $DumpUrl -ExpectedSha $ExpectedSha256 -ExpectedSize $ExpectedBytes
 
 $createExt = Invoke-PgTool -Exe $psql -Password $SuperPassword -IgnoreError -Arguments @(
@@ -169,10 +216,33 @@ $createExt = Invoke-PgTool -Exe $psql -Password $SuperPassword -IgnoreError -Arg
     '-v', 'ON_ERROR_STOP=1', '-c', 'CREATE EXTENSION IF NOT EXISTS vector;'
 )
 if ($createExt.ExitCode -ne 0) {
-    throw @"
-vector extension is not available. Finish scripts/setup_windows_pg.ps1 (copy vector.dll) then re-run this script.
-$($createExt.Output)
-"@
+    Write-Log 'vector.control missing; installing Windows pgvector files'
+    if (-not (Test-IsAdministrator)) {
+        throw @'
+vector extension is not available (no vector.control under C:\Program Files\PostgreSQL\16\share\extension).
+Open an elevated PowerShell (Run as administrator) and run:
+
+  $zip = Join-Path $env:TEMP 'vector.v0.8.6-pg16.zip'
+  curl.exe -L --fail -o $zip 'https://github.com/andreiramani/pgvector_pgsql_windows/releases/download/0.8.6_16/vector.v0.8.6-pg16.zip'
+  $dest = Join-Path $env:TEMP 'pgvector-win'
+  if (Test-Path $dest) { Remove-Item $dest -Recurse -Force }
+  Expand-Archive $zip -DestinationPath $dest -Force
+  Copy-Item "$dest\lib\vector.dll" 'C:\Program Files\PostgreSQL\16\lib\' -Force
+  Copy-Item "$dest\share\extension\*" 'C:\Program Files\PostgreSQL\16\share\extension\' -Force
+  $env:PGPASSWORD = 'postgres'
+  & 'C:\Program Files\PostgreSQL\16\bin\psql.exe' -h 127.0.0.1 -p 5432 -U postgres -d rag -c 'CREATE EXTENSION IF NOT EXISTS vector;'
+
+Then re-run .\restore_rag_dump.cmd from the repo folder.
+'@
+    }
+    Install-PgvectorWindows -Root $PgRoot -Version $PgvectorVersion
+    $createExt = Invoke-PgTool -Exe $psql -Password $SuperPassword -IgnoreError -Arguments @(
+        '-h', $HostName, '-p', "$Port", '-U', $SuperUser, '-d', $AppDb,
+        '-v', 'ON_ERROR_STOP=1', '-c', 'CREATE EXTENSION IF NOT EXISTS vector;'
+    )
+    if ($createExt.ExitCode -ne 0) {
+        throw "CREATE EXTENSION vector still failed after copying files. $($createExt.Output)"
+    }
 }
 
 Write-Log "restoring $DumpPath into ${HostName}:${Port}/${AppDb}"

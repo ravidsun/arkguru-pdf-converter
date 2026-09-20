@@ -197,7 +197,9 @@ when the file is not already on disk, checks
 `sha256=90b21d209c211b48378cf951e349c8ea954cd65f4804385d654659c4d222968c`,
 runs `pg_restore --no-owner --no-acl`, and fails if counts do not match.
 Windows must use `curl.exe` (not `Invoke-WebRequest`): Filebin returns an HTML
-page to the PowerShell user-agent.
+page to the PowerShell user-agent. EDB Postgres has no `vector.control`; the
+restore script copies the unofficial Windows pgvector 0.8.6 zip into
+`C:\Program Files\PostgreSQL\16` (needs an elevated PowerShell).
 It refuses a non-loopback target unless you pass `--force-remote`. To copy a
 **live** other database instead of the portable dump:
 
