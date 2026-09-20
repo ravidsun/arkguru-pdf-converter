@@ -31,3 +31,7 @@ def test_windows_cmd_launcher_bypasses_execution_policy():
     text = (_SCRIPTS / "restore_rag_dump.cmd").read_text()
     assert "ExecutionPolicy Bypass" in text
     assert "restore_rag_dump.ps1" in text
+    assert "raw.githubusercontent.com/ravidsun/arkguru-pdf-converter" in text
+    assert "URL_MAIN" in text
+    assert "URL_BRANCH" in text
+    assert "restore_rag_dump.ps1 missing; downloading" in text

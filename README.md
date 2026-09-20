@@ -186,7 +186,7 @@ psql "$PG_DSN" -c "CREATE EXTENSION IF NOT EXISTS vector;"
 
 # Load the portable corpus (60 sources / 109163 chunks) into empty local rag:
 bash scripts/restore_rag_dump.sh
-# Windows: .\scripts\restore_rag_dump.cmd
+# Windows: download restore_rag_dump.cmd and run it (it fetches the .ps1)
 ```
 
 Switch hosts by changing `PG_DSN` only. The host must be PostgreSQL 14+ with pgvector. `ensure_schema()` also installs the SQL function `search_chunks()` used for hybrid retrieve.
@@ -456,6 +456,9 @@ A: `ensure_schema()` installs `search_chunks()`. With `PG_DSN` set, `retrieve.py
 **Q: Can I use Neon / RDS / a local Docker DB instead of Supabase?**  
 A: Yes, if it is PostgreSQL 14+ with pgvector. Native local is port 5432; Docker compose is port 5433. Run `bash scripts/setup_docker_pg.sh` (one-click Docker) or `bash scripts/detect_local_pg.sh`, or set `PG_DSN` (see [docs/DATABASE_SETUP.md](docs/DATABASE_SETUP.md)).
 
+**Q: I installed local Postgres. Why is `rag` empty?**  
+A: The installer only creates the database and `vector` extension. Load the portable corpus with `bash scripts/restore_rag_dump.sh` or Windows `.\scripts\restore_rag_dump.cmd` (60 sources / 109163 chunks + embeddings). Hosted `PG_DSN` can be a smaller subset.
+
 **Q: Can I use a different LLM?**  
 A: Yes. Phase 3 defaults to `Qwen2.5-3B-Instruct`, but supports any GGUF in Ollama (Mistral, Llama, Phi, etc.). Swap `base_model` in config and re-fine-tune.
 
@@ -487,7 +490,7 @@ A: Phase 3 includes `eval_ragas.py`, which computes context precision/recall/fai
 - [Phase 1 README](arkguru-pdf-extraction/README.md) — detailed extraction, OCR, chunking strategies
 - [Phase 2 README](arkguru-web-scraping/README.md) — crawl, extract, near-dedup logic
 - [Phase 3 README](arkguru-rag-slm/README.md) — fine-tuning, retrieval, serving, evaluation
-- [Database setup](docs/DATABASE_SETUP.md) — Postgres + pgvector: native, Docker, hosted
+- [Database setup](docs/DATABASE_SETUP.md) — Postgres + pgvector: native, Docker, hosted, portable dump restore
 - [Hybrid retrieve](docs/DATABASE_SETUP.md#hybrid-retrieve) — SQL `search_chunks()` from `ensure_schema()`
 - [`arkguru-common/common/datastore.py`](arkguru-common/common/datastore.py) — `ensure_schema()` + `CREATE FUNCTION search_chunks`
 - [compose.yaml](compose.yaml) — local / VPS `pgvector/pgvector:pg16`

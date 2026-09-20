@@ -185,8 +185,10 @@ bash scripts/restore_rag_dump.sh
 ```
 
 ```powershell
-# Windows native (after setup_windows_pg.cmd so pgvector exists)
-.\scripts\restore_rag_dump.cmd
+# Windows native (after setup_windows_pg.cmd so pgvector exists).
+# The .cmd fetches restore_rag_dump.ps1 when you only downloaded the launcher.
+Invoke-WebRequest -Uri "https://raw.githubusercontent.com/ravidsun/arkguru-pdf-converter/refs/heads/cursor/restore-rag-dump-e7c4/scripts/restore_rag_dump.cmd" -OutFile .\restore_rag_dump.cmd
+.\restore_rag_dump.cmd
 ```
 
 The script downloads
