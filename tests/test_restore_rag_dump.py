@@ -15,6 +15,8 @@ def test_bash_restore_pins_complete_dump():
     assert "filebin.net/arkguru-complete" in text
     assert "--force-remote" in text
     assert "GRANT ALL ON ALL TABLES IN SCHEMA public" in text
+    assert "maintenance_work_mem=1GB" in text
+    assert "--section=pre-data" in text
 
 
 def test_windows_restore_pins_complete_dump():
