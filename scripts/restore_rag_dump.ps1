@@ -17,6 +17,7 @@ param(
     [string]$DumpPath = '',
     [string]$DumpUrl = 'https://filebin.net/arkguru-complete/arkguru_rag_complete_20260915.dump',
     [string]$ExpectedSha256 = '90b21d209c211b48378cf951e349c8ea954cd65f4804385d654659c4d222968c',
+    [long]$ExpectedBytes = 62509059,
     [int]$ExpectedChunks = 109163,
     [int]$ExpectedEmbeddings = 109163,
     [int]$ExpectedSources = 60,
@@ -99,6 +100,55 @@ if (-not $psql -or -not $pgRestore) {
     throw "psql/pg_restore not found. Run scripts/setup_windows_pg.cmd first. Expected $PgBin"
 }
 
+function Get-PortableDump {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Url,
+        [Parameter(Mandatory = $true)][string]$ExpectedSha,
+        [long]$ExpectedSize = 62509059
+    )
+    if (Test-Path -LiteralPath $Path) {
+        $existing = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($existing -eq $ExpectedSha) {
+            Write-Log "dump sha256 ok (cached)"
+            return
+        }
+        Write-Log "cached dump has wrong sha256 ($existing); deleting"
+        Remove-Item -LiteralPath $Path -Force
+    }
+
+    Write-Log "downloading portable dump to $Path"
+    # user-agent curl/8.5.0
+    # Filebin returns an HTML interstitial to the WindowsPowerShell user-agent
+    # (sha256 6ba1004fd99133af779ba7ce1c66465a0cbc2834b755145c4a8e088250c872db).
+    # curl.exe / a curl User-Agent gets the real 62509059-byte dump.
+    $curl = Get-Command curl.exe -ErrorAction SilentlyContinue
+    if ($curl) {
+        $prevEap = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        & $curl.Source @('-L', '--fail', '--retry', '3', '--user-agent', 'curl/8.5.0', '-o', $Path, $Url)
+        $code = $LASTEXITCODE
+        if ($null -eq $code) { $code = 0 }
+        $ErrorActionPreference = $prevEap
+        if ($code -ne 0) { throw "curl.exe failed ($code) downloading $Url" }
+    }
+    else {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        $wc = New-Object System.Net.WebClient
+        $wc.Headers.Add('User-Agent', 'curl/8.5.0')
+        $wc.DownloadFile($Url, $Path)
+    }
+
+    if (-not (Test-Path -LiteralPath $Path)) { throw "download produced no file: $Path" }
+    $len = (Get-Item -LiteralPath $Path).Length
+    $hash = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($hash -ne $ExpectedSha) {
+        Remove-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+        throw "sha256 mismatch after download ($len bytes, expected $ExpectedSize). Filebin served HTML instead of the dump. got $hash expected $ExpectedSha"
+    }
+    Write-Log "dump sha256 ok"
+}
+
 if (-not $DumpPath) {
     $candidates = @(
         (Join-Path (Get-Location).Path 'arkguru_rag_complete_20260915.dump'),
@@ -112,17 +162,7 @@ if (-not $DumpPath) {
     $DumpPath = Join-Path $env:TEMP 'arkguru_rag_complete_20260915.dump'
 }
 
-if (-not (Test-Path -LiteralPath $DumpPath)) {
-    Write-Log "downloading portable dump to $DumpPath"
-    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-    Invoke-WebRequest -Uri $DumpUrl -OutFile $DumpPath -UseBasicParsing
-}
-
-$hash = (Get-FileHash -LiteralPath $DumpPath -Algorithm SHA256).Hash.ToLowerInvariant()
-if ($hash -ne $ExpectedSha256) {
-    throw "sha256 mismatch for $DumpPath : got $hash expected $ExpectedSha256"
-}
-Write-Log "dump sha256 ok"
+Get-PortableDump -Path $DumpPath -Url $DumpUrl -ExpectedSha $ExpectedSha256 -ExpectedSize $ExpectedBytes
 
 $createExt = Invoke-PgTool -Exe $psql -Password $SuperPassword -IgnoreError -Arguments @(
     '-h', $HostName, '-p', "$Port", '-U', $SuperUser, '-d', $AppDb,

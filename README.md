@@ -457,7 +457,7 @@ A: `ensure_schema()` installs `search_chunks()`. With `PG_DSN` set, `retrieve.py
 A: Yes, if it is PostgreSQL 14+ with pgvector. Native local is port 5432; Docker compose is port 5433. Run `bash scripts/setup_docker_pg.sh` (one-click Docker) or `bash scripts/detect_local_pg.sh`, or set `PG_DSN` (see [docs/DATABASE_SETUP.md](docs/DATABASE_SETUP.md)).
 
 **Q: I installed local Postgres. Why is `rag` empty?**  
-A: The installer only creates the database and `vector` extension. Load the portable corpus with `bash scripts/restore_rag_dump.sh` or Windows `.\scripts\restore_rag_dump.cmd` (60 sources / 109163 chunks + embeddings). Hosted `PG_DSN` can be a smaller subset.
+A: The installer only creates the database and `vector` extension. Load the portable corpus with `bash scripts/restore_rag_dump.sh` or Windows `.\restore_rag_dump.cmd` (60 sources / 109163 chunks + embeddings). The `.cmd` downloads `restore_rag_dump.ps1` when it is missing. Hosted `PG_DSN` can be a smaller subset.
 
 **Q: Can I use a different LLM?**  
 A: Yes. Phase 3 defaults to `Qwen2.5-3B-Instruct`, but supports any GGUF in Ollama (Mistral, Llama, Phi, etc.). Swap `base_model` in config and re-fine-tune.

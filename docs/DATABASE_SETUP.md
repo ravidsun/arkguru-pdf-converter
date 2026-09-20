@@ -196,6 +196,8 @@ The script downloads
 when the file is not already on disk, checks
 `sha256=90b21d209c211b48378cf951e349c8ea954cd65f4804385d654659c4d222968c`,
 runs `pg_restore --no-owner --no-acl`, and fails if counts do not match.
+Windows must use `curl.exe` (not `Invoke-WebRequest`): Filebin returns an HTML
+page to the PowerShell user-agent.
 It refuses a non-loopback target unless you pass `--force-remote`. To copy a
 **live** other database instead of the portable dump:
 

@@ -9,6 +9,12 @@ set "PS1=%DIR%restore_rag_dump.ps1"
 set "URL_MAIN=https://raw.githubusercontent.com/ravidsun/arkguru-pdf-converter/refs/heads/main/scripts/restore_rag_dump.ps1"
 set "URL_BRANCH=https://raw.githubusercontent.com/ravidsun/arkguru-pdf-converter/refs/heads/cursor/restore-rag-dump-e7c4/scripts/restore_rag_dump.ps1"
 
+findstr /C:"user-agent curl/8.5.0" "%PS1%" >nul 2>nul
+if errorlevel 1 (
+  echo [restore_rag_dump] restore_rag_dump.ps1 is missing or outdated; downloading
+  if exist "%PS1%" del /q "%PS1%"
+)
+
 if not exist "%PS1%" (
   echo [restore_rag_dump] restore_rag_dump.ps1 missing; downloading
   curl.exe -fsSL -o "%PS1%" "%URL_MAIN%"
