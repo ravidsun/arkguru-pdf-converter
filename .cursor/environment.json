@@ -4,7 +4,6 @@
   "repositoryDependencies": [
     "https://github.com/ravidsun/arkguru-common",
     "https://github.com/ravidsun/arkguru-pdf-extraction",
-    "https://github.com/ravidsun/arkguru-web-scraping",
     "https://github.com/ravidsun/arkguru-rag-slm"
   ]
 }
