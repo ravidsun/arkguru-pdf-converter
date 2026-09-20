@@ -1,8 +1,11 @@
 """Unit tests for ChunkStore write/iterate contracts (no live Postgres)."""
 from __future__ import annotations
 
+import pytest
+
 from common.datastore import (
     ChunkStore,
+    _coerce_ef_search,
     _dsn_endpoint,
     _dsn_with_defaults,
     _ensure_search_path_has,
@@ -245,6 +248,96 @@ def test_search_chunks_ddl_uses_hnsw_safe_dense_subquery():
     # JOIN chunks must not wrap the ANN LIMIT (HNSW would be skipped).
     dense_block = sql.split("dense_hits AS")[0]
     assert "JOIN chunks" not in dense_block
+
+
+def test_search_chunks_ddl_falls_back_from_and_to_or_lexical_query():
+    """plainto ANDs every term, which a natural question rarely satisfies."""
+    sql = _search_chunks_ddl("chunks", "chunk_embeddings")
+    # AND is still tried first
+    assert "lex_and AS (\n  SELECT plainto_tsquery('english', query_text)" in sql
+    # the OR form is built from the query's own lexemes
+    assert "tsvector_to_array(" in sql
+    assert "' | '" in sql
+    # and the switch is driven by how many rows the AND pass found
+    assert "(SELECT n FROM lex_and_n) >= k_lexical" in sql
+    assert "THEN (SELECT q FROM lex_and)" in sql
+    assert "ELSE (SELECT q FROM lex_or)" in sql
+    # ranking and truncation are unchanged, so the wider set stays cheap
+    assert "ORDER BY ts_rank(c.ts, lex_q.q) DESC" in sql
+    assert "LIMIT k_lexical" in sql
+
+
+def test_search_chunks_ddl_probe_is_bounded():
+    """The fallback test must not become a full count over the corpus."""
+    sql = _search_chunks_ddl("chunks", "chunk_embeddings")
+    probe = sql.split("lex_and_n AS (")[1].split("),")[0]
+    assert "count(*)" in probe
+    assert "LIMIT k_lexical" in probe
+
+
+def test_search_chunks_ddl_quotes_lexemes():
+    """Apostrophes and tsquery operators in user text must not break to_tsquery."""
+    sql = _search_chunks_ddl("chunks", "chunk_embeddings")
+    assert "quote_literal(lx)" in sql
+
+
+def test_search_chunks_ddl_keeps_thirteen_column_contract():
+    """Phase 3 indexes these positionally; new columns may only be appended."""
+    sql = _search_chunks_ddl("chunks", "chunk_embeddings")
+    returns = sql.split("RETURNS TABLE (")[1].split(")\nLANGUAGE")[0]
+    cols = [c.strip().split()[0] for c in returns.replace("\n", " ").split(",")]
+    assert cols == [
+        "chunk_id", "text", "section", "source_id", "page", "url",
+        "parent_id", "chunk_index", "title", "lang",
+        "rrf_score", "dense_rank", "lexical_rank",
+    ]
+
+
+def test_coerce_ef_search_accepts_ints_and_numeric_strings():
+    assert _coerce_ef_search(200) == 200
+    assert _coerce_ef_search("200") == 200
+    assert _coerce_ef_search(None) is None
+    assert _coerce_ef_search("") is None
+
+
+@pytest.mark.parametrize("bad", ["abc", "1; DROP TABLE chunks", "40 OR 1=1", 0, -5])
+def test_coerce_ef_search_rejects_non_integers(bad):
+    """SET cannot bind parameters, so the value is interpolated and must be safe."""
+    with pytest.raises(ValueError):
+        _coerce_ef_search(bad)
+
+
+def test_search_chunks_sets_ef_search_when_configured(monkeypatch):
+    cur = _FakeCursor(rows=[])
+    statements = []
+
+    class _Recording(_FakeCursor):
+        def execute(self, sql, params=None):
+            statements.append(sql)
+            return super().execute(sql, params)
+
+    rec = _Recording(rows=[])
+    conn = _FakeConn(rec)
+    monkeypatch.setattr(ChunkStore, "_connect", lambda self: conn)
+    store = ChunkStore(dsn="postgresql://u@localhost/db", hnsw_ef_search=200)
+    store.search_chunks("q", [0.1], k_dense=60, k_lexical=60, k_final=120)
+    assert "SET hnsw.ef_search = 200" in statements
+    # the GUC must be raised before the search, or it cannot affect it
+    assert statements.index("SET hnsw.ef_search = 200") < len(statements) - 1
+
+
+def test_search_chunks_omits_ef_search_when_unset(monkeypatch):
+    statements = []
+
+    class _Recording(_FakeCursor):
+        def execute(self, sql, params=None):
+            statements.append(sql)
+            return super().execute(sql, params)
+
+    conn = _FakeConn(_Recording(rows=[]))
+    monkeypatch.setattr(ChunkStore, "_connect", lambda self: conn)
+    ChunkStore(dsn="postgresql://u@localhost/db").search_chunks("q", [0.1])
+    assert not any("ef_search" in s for s in statements)
 
 
 def test_undefined_function_detects_sqlstate():

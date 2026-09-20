@@ -169,6 +169,23 @@ def _search_chunks_ddl(chunks: str, vectors: str) -> str:
     Dense reads *only* ``vectors`` with ``ORDER BY embedding <=> q LIMIT k`` so
     the HNSW index is used. Do not JOIN ``chunks`` before that LIMIT.
     Ranks are 1-based; ``1 / (rrf_k + rank)`` matches Python RRF at rank 0.
+
+    The lexical leg tries ``plainto_tsquery`` first and falls back to an
+    OR-of-lexemes query when that returns fewer than ``k_lexical`` rows.
+    ``plainto_tsquery`` ANDs every term, which a natural-language question
+    almost never satisfies: measured on a 109,163-chunk corpus, "significance
+    of Saturn in the seventh house" matched 1 chunk and a whole golden set of
+    173 questions produced 1 lexical hit in total, leaving RRF fusing a live
+    dense leg with a dead lexical one. The OR form matched 35,228 for the same
+    question, and ``ts_rank`` still orders by how many terms hit, so precision
+    comes from ranking rather than from filtering everything out. ``LIMIT
+    k_lexical`` keeps the wider candidate set free.
+
+    The AND probe is bounded by ``LIMIT k_lexical`` so the fallback test costs a
+    few rows, not a full count. Lexemes are ``quote_literal``-wrapped, so
+    apostrophes and tsquery operators in the user's text cannot break or inject
+    into the query, and a stopword-only question degrades to an empty tsquery
+    that simply matches nothing.
     """
     return f"""
 CREATE OR REPLACE FUNCTION search_chunks(
@@ -205,17 +222,45 @@ dense_hits AS (
     AND (filter_source_type IS NULL OR c.source_type = filter_source_type)
     AND (filter_source_id IS NULL OR c.source_id = filter_source_id)
 ),
+lex_and AS (
+  SELECT plainto_tsquery('english', query_text) AS q
+),
+lex_or AS (
+  SELECT to_tsquery('english',
+           array_to_string(
+             ARRAY(SELECT quote_literal(lx)
+                   FROM unnest(tsvector_to_array(
+                          to_tsvector('english', query_text))) AS lx),
+             ' | ')) AS q
+),
+lex_and_n AS (
+  SELECT count(*) AS n FROM (
+    SELECT 1
+    FROM {chunks} c, lex_and
+    WHERE c.ts @@ lex_and.q
+      AND c.is_parent = false
+      AND (filter_source_type IS NULL OR c.source_type = filter_source_type)
+      AND (filter_source_id IS NULL OR c.source_id = filter_source_id)
+    LIMIT k_lexical
+  ) probe
+),
+lex_q AS (
+  SELECT CASE WHEN (SELECT n FROM lex_and_n) >= k_lexical
+              THEN (SELECT q FROM lex_and)
+              ELSE (SELECT q FROM lex_or)
+         END AS q
+),
 lexical AS (
   SELECT c.chunk_id,
          ROW_NUMBER() OVER (
-           ORDER BY ts_rank(c.ts, plainto_tsquery('english', query_text)) DESC
+           ORDER BY ts_rank(c.ts, lex_q.q) DESC
          )::int AS rnk
-  FROM {chunks} c
-  WHERE c.ts @@ plainto_tsquery('english', query_text)
+  FROM {chunks} c, lex_q
+  WHERE c.ts @@ lex_q.q
     AND c.is_parent = false
     AND (filter_source_type IS NULL OR c.source_type = filter_source_type)
     AND (filter_source_id IS NULL OR c.source_id = filter_source_id)
-  ORDER BY ts_rank(c.ts, plainto_tsquery('english', query_text)) DESC
+  ORDER BY ts_rank(c.ts, lex_q.q) DESC
   LIMIT k_lexical
 ),
 fused AS (
@@ -259,10 +304,25 @@ def _migrate_chunk_columns(cur, table: str) -> None:
         f"ALTER TABLE {table} ALTER COLUMN chunk_index SET NOT NULL")
 
 
+def _coerce_ef_search(value) -> Optional[int]:
+    """Validate ``hnsw.ef_search``. ``SET`` cannot take a bind parameter, so the
+    value is interpolated and must therefore be proven to be a plain integer."""
+    if value is None or value == "":
+        return None
+    try:
+        ef = int(value)
+    except (TypeError, ValueError):
+        raise ValueError(
+            f"hnsw_ef_search must be an integer, got {value!r}") from None
+    if ef < 1:
+        raise ValueError(f"hnsw_ef_search must be >= 1, got {ef}")
+    return ef
+
+
 class ChunkStore:
     def __init__(self, dsn: Optional[str] = None, table: str = "chunks",
                  vectors_table: str = "chunk_embeddings", dim: int = 1024,
-                 dsn_env: str = "PG_DSN"):
+                 dsn_env: str = "PG_DSN", hnsw_ef_search=None):
         self.dsn = dsn or os.environ.get(dsn_env)
         if not self.dsn:
             raise ValueError(
@@ -271,6 +331,7 @@ class ChunkStore:
         self.chunks = table
         self.vectors = vectors_table
         self.dim = dim
+        self.hnsw_ef_search = _coerce_ef_search(hnsw_ef_search)
 
     # -- connection --------------------------------------------------------
     def _connect(self):
@@ -522,6 +583,22 @@ class ChunkStore:
             return out
 
     # -- search (Phase 3 retrieval) ---------------------------------------
+    def _apply_ef_search(self, cur) -> None:
+        """Raise pgvector's HNSW search breadth for this session.
+
+        The default ``hnsw.ef_search`` is 40, and it is a hard ceiling on how
+        many rows the index scan can return: measured on a 109,163-row table,
+        ``LIMIT 60`` returned 40 rows at the default and 60 once ef_search was
+        100. Raising ``k_dense`` past 40 therefore does nothing on its own.
+
+        The value is interpolated because ``SET`` rejects bind parameters
+        (``syntax error at or near "$1"``), so it goes through
+        ``_coerce_ef_search`` first.
+        """
+        if self.hnsw_ef_search is None:
+            return
+        cur.execute(f"SET hnsw.ef_search = {int(self.hnsw_ef_search)}")
+
     def search_chunks(
         self,
         query_text: str,
@@ -552,6 +629,7 @@ class ChunkStore:
         )
         try:
             with self._connect() as conn, conn.cursor() as cur:
+                self._apply_ef_search(cur)
                 cur.execute(sql, params)
                 return cur.fetchall()
         except Exception as e:
