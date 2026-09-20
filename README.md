@@ -100,7 +100,7 @@ brew install tesseract ghostscript
 
 **Key features:**
 - **Schema `web`:** `--sink postgres` writes `web.chunks` / `web.search_chunks` on the same `PG_DSN` as the books. It **refuses** `public`.
-- **Allowlisted BFS:** four free learning sites in `config/config.yaml`; `same_domain_only`, robots.txt, path denylist, Kundli-generator query skip
+- **Allowlisted BFS:** astrology article hubs in `config/config.yaml` (Vedic + traditional Western; no commercial Kundli portals); `same_domain_only`, robots.txt, path denylist, Kundli-generator query skip
 - **Two fetch backends:** local (trafilatura + httpx, free), firecrawl (JS-heavy sites, paid)
 - **Structure-aware chunking:** Same `pack_windows` logic as Phase 1
 - **Near-dedup:** MinHash LSH collapses syndicated/similar pages (Jaccard ≥ 0.9)

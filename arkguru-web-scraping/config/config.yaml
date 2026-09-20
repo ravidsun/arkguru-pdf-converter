@@ -1,6 +1,7 @@
 domain_name: "vedic-astrology"
 phase2:
   seeds:
+    # Existing Vedic learning hubs
     - "https://www.vedicastrologer.org/"
     - "https://www.vedicastrologer.org/jh/index.htm"
     - "https://www.vedicastrologer.org/articles/index.htm"
@@ -11,9 +12,24 @@ phase2:
     - "https://astrolearn.co/blogs"
     - "https://www.cosmicinsights.net/"
     - "https://www.appliedjyotish.com/"
+    # Jyotish encyclopedias / shastra
+    - "https://www.barbarapijan.com/"
+    - "https://www.lightonvedicastrology.com/"
+    - "https://www.astrojyoti.com/"
+    - "https://www.jyotishvidya.com/"
+    - "https://www.siddhantika.com/"
+    - "https://www.wisdomlib.org/hinduism/book/brihat-parashara-hora-shastra"
+    - "https://www.sacred-texts.com/astro/"
+    # Western / traditional article trees (not chart generators)
+    - "https://www.skyscript.co.uk/"
+    - "https://cafeastrology.com/"
+    - "https://www.astro.com/astrology/"
+    - "https://www.sevenstarsastrology.com/"
+    - "https://theastrologyplace.com/"
+    - "https://www.constellationsofwords.com/"
   out_dir: "data/processed"
   out_format: "jsonl"
-  max_pages: 320
+  max_pages: 2000
   max_pages_per_seed: 80
   delay_seconds: 0.75
   same_domain_only: true

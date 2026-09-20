@@ -85,10 +85,11 @@ Drop your own PDFs in `data/raw_pdfs/` and re-run `make phase1`.
 
 ### Phase 2 — URLs → chunks (schema `web`)
 
-Default seeds are four free Vedic learning sites (`vedicastrologer.org`,
-`astrolearn.co`, `cosmicinsights.net`, `appliedjyotish.com`). Postgres writes
-go to **`web.chunks`**, never `public.chunks`. `--sink postgres` exits if
-`config/datastore.yaml` has `schema: public`.
+Default seeds are astrology article hubs in `config/config.yaml` (Vedic
+learning sites plus traditional Western encyclopedias; commercial Kundli
+portals stay out). Postgres writes go to **`web.chunks`**, never
+`public.chunks`. `--sink postgres` exits if `config/datastore.yaml` has
+`schema: public`.
 
 ```bash
 cd ../arkguru-web-scraping
