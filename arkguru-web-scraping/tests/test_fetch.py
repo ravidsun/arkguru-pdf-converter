@@ -58,5 +58,20 @@ def test_extract_links_finds_quoted_htm_in_js_menu():
     assert not any("/modules/jh/" in u for u in links)
 
 
+def test_extract_links_root_relative_href_from_modules_menu():
+    html = '<a href="jh/index.htm">JH</a><a href="articles/foo.pdf">pdf</a>'
+    links = extract_links(html, "https://www.vedicastrologer.org/modules/banner_menu.htm")
+    assert "https://www.vedicastrologer.org/jh/index.htm" in links
+    assert "https://www.vedicastrologer.org/articles/foo.pdf" in links
+    assert not any("/modules/jh/" in u for u in links)
+    assert not any("/modules/articles/" in u for u in links)
+
+
+def test_extract_links_same_dir_filename_stays_relative():
+    html = '<a href="astro_books.htm">books</a>'
+    links = extract_links(html, "https://www.vedicastrologer.org/articles/index.htm")
+    assert "https://www.vedicastrologer.org/articles/astro_books.htm" in links
+
+
 def test_normalize_strips_fragment_and_trailing_slash():
     assert normalize_url("https://x.com/a/#frag") == "https://x.com/a"

@@ -151,17 +151,37 @@ def is_asset_url(url: str) -> bool:
     return any(path.endswith(suf) for suf in ASSET_SUFFIXES)
 
 
+def _origin(url: str) -> str:
+    parsed = urlparse(url)
+    return f"{parsed.scheme}://{parsed.netloc}/"
+
+
+def resolve_href(href: str, base_url: str) -> Optional[str]:
+    """Resolve a single href. Slash-containing relatives are site-root paths
+    (vedicastrologer.org frameset menus live under ``/modules/``)."""
+    href = href.strip()
+    if not href or href.startswith(("#", "mailto:", "javascript:", "tel:")):
+        return None
+    if href.startswith(("http://", "https://", "//", "/")):
+        return urljoin(base_url, href)
+    stripped = href.lstrip("./")
+    if href.startswith("."):
+        return urljoin(base_url, href)
+    if "/" in stripped:
+        return urljoin(_origin(base_url), stripped)
+    return urljoin(base_url, href)
+
+
 def extract_links(html: str, base_url: str) -> list[str]:
     """Collect navigable URLs. ``href`` only — ``src`` is images/scripts."""
     import re
     found: list[str] = []
     for m in re.finditer(r"""href\s*=\s*['"]([^'"]+)['"]""", html, re.I):
-        href = m.group(1).strip()
-        if not href or href.startswith(("#", "mailto:", "javascript:", "tel:")):
-            continue
-        found.append(urljoin(base_url, href))
-    # JS-driven menus (vedicastrologer.org) stash page paths in quoted strings.
-    origin = f"{urlparse(base_url).scheme}://{urlparse(base_url).netloc}/"
+        resolved = resolve_href(m.group(1), base_url)
+        if resolved:
+            found.append(resolved)
+    # JS-driven menus stash page paths in quoted strings.
+    origin = _origin(base_url)
     for m in re.finditer(
             r"""['"]([A-Za-z0-9_./-]+\.(?:html?|pdf|php))['"]""", html, re.I):
         rel = m.group(1)
