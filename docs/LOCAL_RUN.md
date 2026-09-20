@@ -6,15 +6,16 @@ The companion document is [CLOUD_RUN.md](CLOUD_RUN.md).
 
 ## Layout
 
-Clone the shared package, this umbrella repo, and the phase repos as **siblings**. `arkguru-common` is a first-class GitHub repo; this umbrella also vendors a copy under `./arkguru-common` as a fallback when the sibling is missing. Phase 2 (`arkguru-web-scraping`) is optional.
+Clone the shared package, this umbrella repo, and the phase repos as **siblings**. `arkguru-common` and `arkguru-web-scraping` are first-class GitHub repos; this umbrella vendors copies under `./arkguru-common` and `./arkguru-web-scraping` as fallbacks when the siblings are missing.
 
 ```
 some-dir/
   arkguru-common/            # shared package (preferred)
-  arkguru-pdf-converter/     # this repo (env setup + vendored common fallback)
+  arkguru-pdf-converter/     # this repo (env setup + vendored fallbacks)
     arkguru-common/
+    arkguru-web-scraping/    # vendored Phase 2 fallback
   arkguru-pdf-extraction/    # Phase 1
-  arkguru-web-scraping/      # Phase 2 (optional)
+  arkguru-web-scraping/      # Phase 2 (preferred sibling clone)
   arkguru-rag-slm/           # Phase 3
 ```
 
@@ -23,9 +24,8 @@ mkdir -p ~/arkguru && cd ~/arkguru
 git clone https://github.com/ravidsun/arkguru-common.git
 git clone https://github.com/ravidsun/arkguru-pdf-converter.git
 git clone https://github.com/ravidsun/arkguru-pdf-extraction.git
+git clone https://github.com/ravidsun/arkguru-web-scraping.git
 git clone https://github.com/ravidsun/arkguru-rag-slm.git
-# optional Phase 2:
-# git clone https://github.com/ravidsun/arkguru-web-scraping.git
 ```
 
 Python 3.9+ is required. On Debian/Ubuntu also install `python3-venv` (and `python3-pip` if needed).
