@@ -6,16 +6,15 @@ The companion document is [CLOUD_RUN.md](CLOUD_RUN.md).
 
 ## Layout
 
-Clone the shared package, this umbrella repo, and the phase repos as **siblings**. `arkguru-common` and `arkguru-web-scraping` are first-class GitHub repos; this umbrella vendors copies under `./arkguru-common` and `./arkguru-web-scraping` as fallbacks when the siblings are missing.
+Clone the shared package, this umbrella repo, and the phase repos as **siblings**. `arkguru-common` is a first-class GitHub repo; this umbrella vendors a copy under `./arkguru-common`. Phase 2 lives **in this umbrella** for now (`./arkguru-web-scraping`); the public GitHub repo is not the source of truth.
 
 ```
 some-dir/
   arkguru-common/            # shared package (preferred)
-  arkguru-pdf-converter/     # this repo (env setup + vendored fallbacks)
+  arkguru-pdf-converter/     # this repo (env setup + vendored common + Phase 2)
     arkguru-common/
-    arkguru-web-scraping/    # vendored Phase 2 fallback
+    arkguru-web-scraping/    # Phase 2 (source of truth for now)
   arkguru-pdf-extraction/    # Phase 1
-  arkguru-web-scraping/      # Phase 2 (preferred sibling clone)
   arkguru-rag-slm/           # Phase 3
 ```
 
@@ -24,7 +23,6 @@ mkdir -p ~/arkguru && cd ~/arkguru
 git clone https://github.com/ravidsun/arkguru-common.git
 git clone https://github.com/ravidsun/arkguru-pdf-converter.git
 git clone https://github.com/ravidsun/arkguru-pdf-extraction.git
-git clone https://github.com/ravidsun/arkguru-web-scraping.git
 git clone https://github.com/ravidsun/arkguru-rag-slm.git
 ```
 
