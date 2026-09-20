@@ -31,7 +31,7 @@ _DEFAULTS: dict[str, Any] = {
     "backend": "file",
     "postgres": {"dsn_env": "PG_DSN", "dsn": None,
                  "chunks_table": "chunks", "vectors_table": "chunk_embeddings",
-                 "dim": 1024},
+                 "dim": 1024, "hnsw_ef_search": None},
     "file": {"out_dir": "data/processed", "out_format": "jsonl"},
     "local": {"path": "data/store/index"},
 }
@@ -134,4 +134,5 @@ def open_chunk_store(path: Optional[str] = None, **overrides):
         table=pg.get("chunks_table", "chunks"),
         vectors_table=pg.get("vectors_table", "chunk_embeddings"),
         dim=int(pg.get("dim", 1024)),
+        hnsw_ef_search=pg.get("hnsw_ef_search"),
     )
