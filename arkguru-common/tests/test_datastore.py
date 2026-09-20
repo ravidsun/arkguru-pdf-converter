@@ -15,6 +15,7 @@ from common.datastore import (
     _search_chunks_ddl,
     _sql_ident,
     _undefined_function,
+    index_ident,
     qualify_ident,
 )
 from common.schema import Chunk
@@ -400,6 +401,8 @@ def test_qualify_ident_web_schema():
     assert qualify_ident("chunks", "web") == "web.chunks"
     assert qualify_ident("search_chunks", "web") == "web.search_chunks"
     assert qualify_ident("chunk_embeddings", "web") == "web.chunk_embeddings"
+    assert index_ident("web.chunks", "_ts_idx") == "chunks_ts_idx"
+    assert index_ident("chunks", "_ts_idx") == "chunks_ts_idx"
 
 
 @pytest.mark.parametrize("bad", [
@@ -478,6 +481,9 @@ def test_ensure_schema_creates_web_schema(monkeypatch):
     assert "CREATE OR REPLACE FUNCTION web.search_chunks(" in joined
     assert "CREATE TABLE IF NOT EXISTS web.chunks" in joined
     assert "CREATE TABLE IF NOT EXISTS web.chunk_embeddings" in joined
+    assert "CREATE INDEX IF NOT EXISTS chunks_ts_idx ON web.chunks" in joined
+    assert "CREATE INDEX IF NOT EXISTS chunk_embeddings_hnsw_idx ON web.chunk_embeddings" in joined
+    assert "web.chunks_ts_idx" not in joined
     public_fn = [s for s in cur.sqls if "FUNCTION search_chunks(" in s
                  and "FUNCTION web.search_chunks(" not in s]
     assert public_fn == []

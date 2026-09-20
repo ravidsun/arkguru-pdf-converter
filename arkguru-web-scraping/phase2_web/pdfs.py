@@ -78,11 +78,22 @@ def ingest_pdfs_with_phase1(
     from pathlib import Path as P
     import sys
     here = P(__file__).resolve()
-    for parent in here.parents:
-        sibling = parent / "arkguru-pdf-extraction"
+    candidates = [parent / "arkguru-pdf-extraction" for parent in here.parents]
+    cwd = P.cwd()
+    candidates.extend([
+        cwd / "arkguru-pdf-extraction",
+        cwd.parent / "arkguru-pdf-extraction",
+        P("/tmp/arkguru-repos/arkguru-pdf-extraction"),
+        P("/workspace/arkguru-pdf-extraction"),
+    ])
+    for sibling in candidates:
         if (sibling / "phase1_pdf" / "pipeline.py").exists():
             sys.path.insert(0, str(sibling))
             break
+    else:
+        raise RuntimeError(
+            "arkguru-pdf-extraction not found; clone it as a sibling to ingest PDFs"
+        )
     from phase1_pdf.pipeline import Phase1Config, run
 
     cfg = Phase1Config(

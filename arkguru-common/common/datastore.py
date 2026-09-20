@@ -185,6 +185,17 @@ def qualify_ident(name: str, schema: Optional[str] = None) -> str:
     return f"{_sql_ident(schema.strip())}.{ident}"
 
 
+def index_ident(table: str, suffix: str) -> str:
+    """Unqualified index name for ``CREATE INDEX``.
+
+    ``CREATE INDEX web.chunks_ts_idx`` is a syntax error: the parser reads
+    ``web.chunks`` as a qualified name and then rejects ``_ts_idx``. Indexes
+    live in the table's schema when the ``ON`` clause is qualified.
+    """
+    bare = table.split(".")[-1]
+    return _sql_ident(f"{bare}{suffix}")
+
+
 def _search_chunks_ddl(chunks: str, vectors: str,
                        function: str = "search_chunks") -> str:
     """SQL function: HNSW-safe dense subquery + FTS, fused with RRF.
@@ -431,10 +442,10 @@ class ChunkStore:
                                  (to_tsvector('english', coalesce(text,''))) STORED,
                     created_at   timestamptz DEFAULT now()
                 );""")
-            cur.execute(f"CREATE INDEX IF NOT EXISTS {self.chunks}_ts_idx "
+            cur.execute(f"CREATE INDEX IF NOT EXISTS {index_ident(self.chunks, '_ts_idx')} "
                         f"ON {self.chunks} USING gin(ts);")
             cur.execute(
-                f"CREATE INDEX IF NOT EXISTS {self.chunks}_source_idx "
+                f"CREATE INDEX IF NOT EXISTS {index_ident(self.chunks, '_source_idx')} "
                 f"ON {self.chunks} (source_type, source_id);")
             _migrate_chunk_columns(cur, self.chunks)
             # 2) vectors = embeddings only, keyed to chunks
@@ -446,7 +457,7 @@ class ChunkStore:
                     model      text,
                     created_at timestamptz DEFAULT now()
                 );""")
-            cur.execute(f"CREATE INDEX IF NOT EXISTS {self.vectors}_hnsw_idx "
+            cur.execute(f"CREATE INDEX IF NOT EXISTS {index_ident(self.vectors, '_hnsw_idx')} "
                         f"ON {self.vectors} USING hnsw (embedding vector_cosine_ops);")
             cur.execute(_search_chunks_ddl(
                 self.chunks, self.vectors, function=self.search_fn))
