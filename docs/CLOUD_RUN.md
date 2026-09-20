@@ -11,6 +11,7 @@ The personal Cloud Agent environment for this workspace is **dashboard-managed**
 - `arkguru-common`
 - `arkguru-pdf-converter` (this repo; `install` script + optional vendored common)
 - `arkguru-pdf-extraction`
+- `arkguru-web-scraping`
 - `arkguru-rag-slm`
 
 `install` is empty until the environment is Saved with a working script. After Save, new agents run that `install` on boot (or from an environment build snapshot). There is no `start` command and no `terminals` entry: the pipeline is CLI-driven. Long-running workers (`make worker`, `orchestrator.py`) are started on demand.
@@ -24,6 +25,7 @@ This repo also commits [`.cursor/environment.json`](../.cursor/environment.json)
   "repositoryDependencies": [
     "https://github.com/ravidsun/arkguru-common",
     "https://github.com/ravidsun/arkguru-pdf-extraction",
+    "https://github.com/ravidsun/arkguru-web-scraping",
     "https://github.com/ravidsun/arkguru-rag-slm"
   ]
 }
@@ -32,9 +34,9 @@ This repo also commits [`.cursor/environment.json`](../.cursor/environment.json)
 | Field | Role |
 |---|---|
 | `install` | After checkout, creates `.venv`, installs `arkguru-common`, and installs phase dependencies. Idempotent. Does **not** start servers. |
-| `repositoryDependencies` | Puts `arkguru-common` and the Phase 1 / Phase 3 repos in the Cloud Agent GitHub token scope so they can be checked out as siblings. |
+| `repositoryDependencies` | Puts `arkguru-common` and the Phase 1 / Phase 2 / Phase 3 repos in the Cloud Agent GitHub token scope so they can be checked out as siblings. |
 
-Phase 2 (`arkguru-web-scraping`) is optional and is **not** part of this environment. If that repo is present as a sibling, `install` will pick it up; otherwise it logs a warning and continues.
+Phase 2 (`arkguru-web-scraping`) is a first-class sibling. `install` clones or uses the vendored fallback.
 
 Changes to the dashboard environment or to `.cursor/environment.json` apply to **newly started** agents, not an already-running session.
 
