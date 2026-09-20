@@ -161,11 +161,10 @@ def run(cfg: Phase2Config) -> list[Chunk]:
         same_domain_only=cfg.same_domain_only,
     )
     chunks = pages_to_chunks(result, cfg)
+    write_file_sink(chunks, cfg)
     if cfg.sink == "postgres":
         upserted = upsert_web(chunks, store)
         log.info("upserted %d web chunks into %s", upserted, store.chunks)
-    else:
-        write_file_sink(chunks, cfg)
 
     harvest_pdfs(result, cfg, store=store)
     return chunks
