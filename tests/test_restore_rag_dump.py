@@ -32,6 +32,10 @@ def test_windows_restore_pins_complete_dump():
     assert "Install-PgvectorWindows" in text
     assert "vector.v0.8.6-pg16.zip" in text
     assert "vector.control" in text
+    assert "maintenance_work_mem=1GB" in text
+    assert "--section=pre-data" in text
+    assert "--section=post-data" in text
+    assert "SkipHnsw" in text
 
 
 def test_windows_cmd_launcher_bypasses_execution_policy():

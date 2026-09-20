@@ -29,7 +29,8 @@ param(
     [string]$AppUser = 'rag',
     [string]$AppPassword = 'change-me',
     [string]$AppDb = 'rag',
-    [string]$PgvectorVersion = '0.8.6'
+    [string]$PgvectorVersion = '0.8.6',
+    [switch]$SkipHnsw
 )
 
 Set-StrictMode -Version Latest
@@ -245,12 +246,61 @@ Then re-run .\restore_rag_dump.cmd from the repo folder.
     }
 }
 
-Write-Log "restoring $DumpPath into ${HostName}:${Port}/${AppDb}"
-Invoke-PgTool -Exe $pgRestore -Password $SuperPassword -Arguments @(
-    '--no-owner', '--no-acl', '--clean', '--if-exists',
+function Invoke-PgRestoreStreaming {
+    param([Parameter(Mandatory = $true)][string[]]$Arguments)
+    $prevPass = $env:PGPASSWORD
+    $prevOpt = $env:PGOPTIONS
+    $prevEap = $ErrorActionPreference
+    $env:PGPASSWORD = $SuperPassword
+    # Default maintenance_work_mem is 64MB; HNSW on 109k 1024-d rows thrashes for a long time.
+    $env:PGOPTIONS = '-c maintenance_work_mem=1GB'
+    try {
+        $ErrorActionPreference = 'Continue'
+        Write-Log ("pg_restore " + ($Arguments -join ' '))
+        & $pgRestore @Arguments
+        $code = $LASTEXITCODE
+        if ($null -eq $code) { $code = 0 }
+        if ($code -ne 0) { throw "pg_restore failed ($code)" }
+    }
+    finally {
+        $ErrorActionPreference = $prevEap
+        if ($null -eq $prevPass) { Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue }
+        else { $env:PGPASSWORD = $prevPass }
+        if ($null -eq $prevOpt) { Remove-Item Env:PGOPTIONS -ErrorAction SilentlyContinue }
+        else { $env:PGOPTIONS = $prevOpt }
+    }
+}
+
+Write-Log "loading table data into ${HostName}:${Port}/${AppDb} (a few minutes)"
+Invoke-PgRestoreStreaming -Arguments @(
+    '--verbose', '--no-owner', '--no-acl', '--clean', '--if-exists',
+    '--section=pre-data', '--section=data',
     '-h', $HostName, '-p', "$Port", '-U', $SuperUser, '-d', $AppDb,
     $DumpPath
-) | Out-Null
+)
+Write-Log 'table data loaded; next step is indexes (HNSW is the slow part, 10-20 min on a laptop)'
+
+if ($SkipHnsw) {
+    $list = Join-Path $env:TEMP 'arkguru_rag_restore.list'
+    $toc = Invoke-PgTool -Exe $pgRestore -Password $SuperPassword -Arguments @('-l', $DumpPath)
+    $kept = @($toc.Output -split '\r?\n' | Where-Object { $_ -notmatch 'chunk_embeddings_hnsw_idx' })
+    Set-Content -Path $list -Value $kept -Encoding ascii
+    Write-Log 'SkipHnsw: restoring pkeys/GIN only'
+    Invoke-PgRestoreStreaming -Arguments @(
+        '--verbose', '--no-owner', '--no-acl',
+        '-L', $list,
+        '-h', $HostName, '-p', "$Port", '-U', $SuperUser, '-d', $AppDb,
+        $DumpPath
+    )
+}
+else {
+    Invoke-PgRestoreStreaming -Arguments @(
+        '--verbose', '--no-owner', '--no-acl',
+        '--section=post-data',
+        '-h', $HostName, '-p', "$Port", '-U', $SuperUser, '-d', $AppDb,
+        $DumpPath
+    )
+}
 
 $grantSql = @"
 GRANT ALL ON SCHEMA public TO $AppUser;
