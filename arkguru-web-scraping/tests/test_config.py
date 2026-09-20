@@ -24,7 +24,7 @@ def test_config_has_four_learning_seeds():
     assert "astrolearn.co" in joined
     assert "cosmicinsights.net" in joined
     assert "appliedjyotish.com" in joined
-    assert len(seeds) == 4
+    assert any("/jh/index.htm" in s for s in seeds)
     # commercial portals stay out of first pass
     assert "astrotalk.com" not in joined
     assert "astrosage.com" not in joined

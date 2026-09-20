@@ -23,6 +23,12 @@ BINARY_SUFFIXES = (
     ".iso", ".deb", ".rpm", ".apk",
 )
 
+ASSET_SUFFIXES = BINARY_SUFFIXES + (
+    ".css", ".js", ".mjs", ".map",
+    ".jpg", ".jpeg", ".png", ".gif", ".svg", ".webp", ".ico", ".bmp",
+    ".woff", ".woff2", ".ttf", ".eot", ".mp3", ".mp4", ".avi", ".mov",
+)
+
 GENERATOR_QUERY_KEYS = frozenset({
     "dob", "dateofbirth", "birthdate", "birth_date", "latitude", "longitude",
     "lat", "lon", "boy", "girl", "name", "pname",
@@ -140,16 +146,33 @@ class CrawlResult:
     skipped: int = 0
 
 
+def is_asset_url(url: str) -> bool:
+    path = (urlparse(url).path or "").lower()
+    return any(path.endswith(suf) for suf in ASSET_SUFFIXES)
+
+
 def extract_links(html: str, base_url: str) -> list[str]:
-    # Local import so tests can run without lxml. href="..." is enough.
+    """Collect navigable URLs. ``href`` only — ``src`` is images/scripts."""
     import re
     found: list[str] = []
-    for m in re.finditer(r"""(?:href|src)\s*=\s*['"]([^'"]+)['"]""", html, re.I):
+    for m in re.finditer(r"""href\s*=\s*['"]([^'"]+)['"]""", html, re.I):
         href = m.group(1).strip()
         if not href or href.startswith(("#", "mailto:", "javascript:", "tel:")):
             continue
         found.append(urljoin(base_url, href))
-    return found
+    # JS-driven menus (vedicastrologer.org) stash page paths in quoted strings.
+    origin = f"{urlparse(base_url).scheme}://{urlparse(base_url).netloc}/"
+    for m in re.finditer(
+            r"""['"]([A-Za-z0-9_./-]+\.(?:html?|pdf|php))['"]""", html, re.I):
+        rel = m.group(1)
+        found.append(urljoin(origin, rel.lstrip("./")))
+    # de-dupe preserve order
+    out, seen = [], set()
+    for u in found:
+        if u not in seen:
+            seen.add(u)
+            out.append(u)
+    return out
 
 
 def fetch_url(client, url: str, timeout: float = 20.0) -> FetchedPage:
@@ -214,7 +237,7 @@ def crawl(
                 if same_domain_only and not same_site(url, seed):
                     out.skipped += 1
                     continue
-                if path_denied(url, path_deny) or is_kundli_generator(url) or is_binary_url(url):
+                if path_denied(url, path_deny) or is_kundli_generator(url) or is_binary_url(url) or is_asset_url(url):
                     out.skipped += 1
                     continue
                 if not robots.allowed(url, fetch_bytes):

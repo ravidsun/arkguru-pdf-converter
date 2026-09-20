@@ -2,7 +2,13 @@ domain_name: "vedic-astrology"
 phase2:
   seeds:
     - "https://www.vedicastrologer.org/"
+    - "https://www.vedicastrologer.org/jh/index.htm"
+    - "https://www.vedicastrologer.org/articles/index.htm"
+    - "https://www.vedicastrologer.org/classes/index.htm"
+    - "https://www.vedicastrologer.org/predict/index.htm"
+    - "https://www.vedicastrologer.org/modules/banner_menu.htm"
     - "https://astrolearn.co/"
+    - "https://astrolearn.co/blogs"
     - "https://www.cosmicinsights.net/"
     - "https://www.appliedjyotish.com/"
   out_dir: "data/processed"
