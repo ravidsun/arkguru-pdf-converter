@@ -85,17 +85,26 @@ make phase1                           # data/processed/sample_handbook/chunks.js
 
 Drop your own PDFs in `data/raw_pdfs/` and re-run `make phase1`.
 
-### Phase 2 — URLs → chunks
+### Phase 2 — URLs → chunks (schema `web`)
 
-Edit `config/config.yaml` `phase2.seeds`, or pass seeds on the CLI:
+Default seeds are four free Vedic learning sites (`vedicastrologer.org`,
+`astrolearn.co`, `cosmicinsights.net`, `appliedjyotish.com`). Postgres writes
+go to **`web.chunks`**, never `public.chunks`. `--sink postgres` exits if
+`config/datastore.yaml` has `schema: public`.
 
 ```bash
 cd ../arkguru-web-scraping
-python -m phase2_web.pipeline --seeds https://example.com/docs --max-pages 20
+python -m phase2_web.pipeline --config config/config.yaml
 # → data/processed/web_chunks.jsonl
+
+# same PG_DSN as the books; isolated schema:
+python -m phase2_web.pipeline --config config/config.yaml --sink postgres
+# DBeaver: database `rag` → schema `web` → table `chunks`
 ```
 
-For a JS-heavy site, set `backend: firecrawl` and `FIRECRAWL_API_KEY`.
+Public PDFs linked from those sites are saved under `data/raw_pdfs/` and
+Phase-1 extracted into `web.chunks` as well (`--datastore-config` on Phase 1).
+Orchestrator `crawl_web` stays disabled until you turn it on.
 
 ### Phase 3 — ingest + retrieve (hashing embedder)
 
@@ -213,6 +222,7 @@ python -m phase1_pdf.pipeline --input data/raw_pdfs --sink postgres
 
 cd ../arkguru-web-scraping
 python -m phase2_web.pipeline --config config/config.yaml --sink postgres
+# → web.chunks / web.search_chunks (refuses public.chunks)
 ```
 
 4. Fine-tune (optional, CPU hours), merge/quantize, register with Ollama as `domain-slm` (see the header of `phase3_rag/serve.py`).

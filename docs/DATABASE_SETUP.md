@@ -273,14 +273,21 @@ PowerShell for one session:
 $env:PG_DSN="postgresql://postgres.PROJECT_REF:YOUR_PASSWORD@aws-0-REGION.pooler.supabase.com:5432/postgres?sslmode=require"
 ```
 
-**Two tables.** Phase 1 `--sink postgres` fills **`chunks`** only
+**Two tables.** Phase 1 `--sink postgres` fills **`public.chunks`** only
 (`chunk_index` is 0-based). Phase 3 `embed_datastore` fills
-**`chunk_embeddings`**. In the Table Editor, inspect `chunks.chunk_index` (a
-`0` can look blank).
+**`public.chunk_embeddings`**. Phase 2 `--sink postgres` writes **`web.chunks`**
+on the same database (`postgres.schema: web` in
+`arkguru-web-scraping/config/datastore.yaml`) and **refuses** `public`.
+`ensure_schema()` creates `web.search_chunks()` so it cannot overwrite
+`public.search_chunks()`. In DBeaver, inspect schema `public` for books and
+schema `web` for the crawl.
 
 ```bash
 cd arkguru-pdf-extraction
 python -m phase1_pdf.pipeline --input data/raw_pdfs --sink postgres
+
+cd arkguru-web-scraping
+python -m phase2_web.pipeline --config config/config.yaml --sink postgres
 
 cd arkguru-rag-slm
 python -m phase3_rag.embed_datastore --embedder hashing --dim 1024

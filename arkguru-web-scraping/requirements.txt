@@ -1,0 +1,13 @@
+# Shared schema / datastore / chunking (sibling package)
+-e ../arkguru-common
+# Phase 2 - crawl + extract (runs local, CPU-only)
+httpx>=0.27
+trafilatura>=1.12
+datasketch>=1.6
+pyyaml>=6.0
+tiktoken>=0.7
+# optional: Postgres sink uses common[postgres]
+# psycopg[binary]>=3.2
+# pgvector>=0.3
+# optional JS-heavy sites
+# firecrawl-py

@@ -1,0 +1,19 @@
+# =============================================================================
+# Datastore -- Phase 2 writes schema `web` on the same PG_DSN as the books.
+# public.chunks is the 109k PDF corpus. This file must keep schema: web.
+# =============================================================================
+datastore:
+  backend: postgres
+  postgres:
+    dsn_env: PG_DSN
+    dsn: null
+    schema: web
+    chunks_table: chunks
+    vectors_table: chunk_embeddings
+    dim: 1024
+    hnsw_ef_search: 200
+  file:
+    out_dir: data/processed
+    out_format: jsonl
+  local:
+    path: data/store/index
