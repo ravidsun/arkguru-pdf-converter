@@ -13,7 +13,9 @@ from common.datastore import (
     _migrate_chunk_columns,
     _redact_secret,
     _search_chunks_ddl,
+    _sql_ident,
     _undefined_function,
+    qualify_ident,
 )
 from common.schema import Chunk
 
@@ -25,6 +27,7 @@ class _FakeCursor:
         self.sql = None
         self.sqls: list[str] = []
         self._rows = list(rows)
+        self.rowcount = 0
 
     def __enter__(self):
         return self
@@ -35,6 +38,7 @@ class _FakeCursor:
     def execute(self, sql, params=None):
         self.sql = sql
         self.sqls.append(sql)
+        self.rowcount = 0
 
     def executemany(self, sql, rows):
         self.sql = sql
@@ -383,3 +387,129 @@ def test_search_chunks_retries_once_after_ensure_schema(monkeypatch):
     rows = store.search_chunks("q", [0.0], k_final=6)
     assert called["n"] == 1
     assert rows[0][0] == "id0"
+
+
+def test_qualify_ident_public_is_unqualified():
+    assert qualify_ident("chunks") == "chunks"
+    assert qualify_ident("chunks", None) == "chunks"
+    assert qualify_ident("chunks", "public") == "chunks"
+    assert qualify_ident("chunks", "") == "chunks"
+
+
+def test_qualify_ident_web_schema():
+    assert qualify_ident("chunks", "web") == "web.chunks"
+    assert qualify_ident("search_chunks", "web") == "web.search_chunks"
+    assert qualify_ident("chunk_embeddings", "web") == "web.chunk_embeddings"
+
+
+@pytest.mark.parametrize("bad", [
+    "web; DROP TABLE chunks", "chunks-x", "web.chunks", "1web",
+    "web--", "web/*",
+])
+def test_qualify_ident_rejects_injection(bad):
+    with pytest.raises(ValueError):
+        _sql_ident(bad)
+    with pytest.raises(ValueError):
+        qualify_ident(bad, "web")
+    with pytest.raises(ValueError):
+        qualify_ident("chunks", bad)
+
+
+def test_sql_ident_rejects_empty():
+    with pytest.raises(ValueError):
+        _sql_ident("")
+    # empty schema is treated as public, not injection
+    assert qualify_ident("chunks", "") == "chunks"
+
+
+def test_web_store_qualifies_tables_and_search_fn():
+    store = ChunkStore(dsn="postgresql://unused", schema="web")
+    assert store.schema == "web"
+    assert store.chunks == "web.chunks"
+    assert store.vectors == "web.chunk_embeddings"
+    assert store.search_fn == "web.search_chunks"
+    assert store.is_public_schema is False
+    assert ChunkStore(dsn="postgresql://unused").is_public_schema is True
+
+
+def test_search_chunks_ddl_web_does_not_replace_public_function():
+    sql = _search_chunks_ddl(
+        "web.chunks", "web.chunk_embeddings", function="web.search_chunks")
+    assert "CREATE OR REPLACE FUNCTION web.search_chunks(" in sql
+    assert "FROM web.chunk_embeddings v" in sql
+    assert "JOIN web.chunks c" in sql
+    # Unqualified public.search_chunks must not be created.
+    assert "FUNCTION search_chunks(" not in sql
+
+
+def test_web_search_chunks_calls_schema_qualified_function(monkeypatch):
+    cur = _FakeCursor(rows=[])
+    conn = _FakeConn(cur)
+    monkeypatch.setattr(ChunkStore, "_connect", lambda self: conn)
+    ChunkStore(dsn="postgresql://unused", schema="web").search_chunks(
+        "q", [0.1], k_final=6)
+    assert "FROM web.search_chunks(" in cur.sql
+    assert "FROM search_chunks(" not in cur.sql.replace(
+        "FROM web.search_chunks(", "")
+
+
+def test_delete_by_source_id(monkeypatch):
+    cur = _FakeCursor()
+    conn = _FakeConn(cur)
+    monkeypatch.setattr(ChunkStore, "_connect", lambda self: conn)
+    n = ChunkStore(dsn="postgresql://unused", schema="web").delete_by_source_id(
+        "https://example.com/a")
+    assert n == 0
+    assert "DELETE FROM web.chunks WHERE source_id" in cur.sql
+
+
+def test_ensure_schema_creates_web_schema(monkeypatch):
+    class _Cur(_FakeCursor):
+        def fetchone(self):
+            # to_regclass -> missing tables; SHOW / extension probes
+            return (None,)
+
+    cur = _Cur()
+    conn = _FakeConn(cur)
+    monkeypatch.setattr(ChunkStore, "_connect", lambda self: conn)
+    ChunkStore(dsn="postgresql://unused", schema="web").ensure_schema()
+    joined = " ".join(cur.sqls)
+    assert "CREATE SCHEMA IF NOT EXISTS web" in joined
+    assert "CREATE OR REPLACE FUNCTION web.search_chunks(" in joined
+    assert "CREATE TABLE IF NOT EXISTS web.chunks" in joined
+    assert "CREATE TABLE IF NOT EXISTS web.chunk_embeddings" in joined
+    public_fn = [s for s in cur.sqls if "FUNCTION search_chunks(" in s
+                 and "FUNCTION web.search_chunks(" not in s]
+    assert public_fn == []
+
+
+def test_ensure_schema_public_does_not_create_web_schema(monkeypatch):
+    class _Cur(_FakeCursor):
+        def fetchone(self):
+            return (None,)
+
+    cur = _Cur()
+    conn = _FakeConn(cur)
+    monkeypatch.setattr(ChunkStore, "_connect", lambda self: conn)
+    ChunkStore(dsn="postgresql://unused").ensure_schema()
+    joined = " ".join(cur.sqls)
+    assert "CREATE SCHEMA IF NOT EXISTS web" not in joined
+    assert "CREATE OR REPLACE FUNCTION search_chunks(" in joined
+    assert "FUNCTION web.search_chunks(" not in joined
+
+
+def test_open_chunk_store_reads_schema(tmp_path):
+    from common.datastore_config import open_chunk_store
+    p = tmp_path / "datastore.yaml"
+    p.write_text(
+        "datastore:\n"
+        "  postgres:\n"
+        "    dsn: postgresql://unused\n"
+        "    schema: web\n"
+        "    chunks_table: chunks\n"
+        "    vectors_table: chunk_embeddings\n"
+    )
+    store = open_chunk_store(str(p))
+    assert store.schema == "web"
+    assert store.chunks == "web.chunks"
+    assert store.search_fn == "web.search_chunks"

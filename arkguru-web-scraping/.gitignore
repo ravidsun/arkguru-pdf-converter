@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+data/raw_pdfs/*
+data/processed/*
+!data/**/.gitkeep
+.env
+.pytest_cache/

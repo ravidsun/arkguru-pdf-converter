@@ -194,15 +194,15 @@ SELECT chunk_id, chunk_index, source_id, page FROM chunks ORDER BY source_id, ch
 SELECT count(*) FROM chunk_embeddings;
 ```
 
-Phase 2 is skipped unless `arkguru-web-scraping` is checked out. When it is, a local HTTP fixture avoids public crawls:
+Phase 2 is skipped unless `arkguru-web-scraping` is checked out. When it is, a local HTTP fixture avoids public crawls. Postgres sink uses schema `web` (never `public.chunks`):
 
 ```bash
 mkdir -p /tmp/arkguru-demo-site
 printf '<!DOCTYPE html><html><head><title>Demo</title></head><body><h1>Safety</h1><p>PPE includes insulated gloves rated to 1000V and safety eyewear. Lockout-tagout is mandatory before servicing any unit.</p></body></html>' \
   > /tmp/arkguru-demo-site/index.html
 python3 -m http.server 8899 --directory /tmp/arkguru-demo-site &
-cd /agent/repos/arkguru-web-scraping
-python -m phase2_web.pipeline --seeds http://127.0.0.1:8899/index.html --max-pages 5
+cd /tmp/arkguru-repos/arkguru-web-scraping
+python -m phase2_web.pipeline --seeds http://127.0.0.1:8899/index.html --max-pages 5 --no-pdfs
 ```
 
 ## Cloud-specific constraints

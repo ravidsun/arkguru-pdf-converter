@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from typing import Iterable, Iterator, Optional
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
@@ -37,6 +38,8 @@ log = logging.getLogger("common.datastore")
 
 _LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
 _SSLMODE_ENV = "PG_SSLMODE"
+_IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_PUBLIC_SCHEMAS = frozenset({"", "public"})
 
 # columns of the chunks (source-of-truth) table
 _COLS = ["chunk_id", "text", "source_type", "source_id", "chunk_index",
@@ -163,7 +166,27 @@ def _undefined_function(exc: BaseException) -> bool:
     return type(exc).__name__ == "UndefinedFunction"
 
 
-def _search_chunks_ddl(chunks: str, vectors: str) -> str:
+def _sql_ident(name: str) -> str:
+    """Return ``name`` if it is a safe unquoted Postgres identifier."""
+    if not name or not _IDENT_RE.match(name):
+        raise ValueError(f"invalid SQL identifier: {name!r}")
+    return name
+
+
+def qualify_ident(name: str, schema: Optional[str] = None) -> str:
+    """Qualify ``name`` with ``schema`` unless the schema is public/empty.
+
+    Default (Phase 1 / book corpus) stays unqualified ``chunks`` so existing
+    SQL and tests keep working. Phase 2 uses ``schema='web'`` → ``web.chunks``.
+    """
+    ident = _sql_ident(name)
+    if schema is None or schema.strip().lower() in _PUBLIC_SCHEMAS:
+        return ident
+    return f"{_sql_ident(schema.strip())}.{ident}"
+
+
+def _search_chunks_ddl(chunks: str, vectors: str,
+                       function: str = "search_chunks") -> str:
     """SQL function: HNSW-safe dense subquery + FTS, fused with RRF.
 
     Dense reads *only* ``vectors`` with ``ORDER BY embedding <=> q LIMIT k`` so
@@ -188,7 +211,7 @@ def _search_chunks_ddl(chunks: str, vectors: str) -> str:
     that simply matches nothing.
     """
     return f"""
-CREATE OR REPLACE FUNCTION search_chunks(
+CREATE OR REPLACE FUNCTION {function}(
   query_text      text,
   query_embedding vector,
   k_dense         int  DEFAULT 20,
@@ -322,16 +345,23 @@ def _coerce_ef_search(value) -> Optional[int]:
 class ChunkStore:
     def __init__(self, dsn: Optional[str] = None, table: str = "chunks",
                  vectors_table: str = "chunk_embeddings", dim: int = 1024,
-                 dsn_env: str = "PG_DSN", hnsw_ef_search=None):
+                 dsn_env: str = "PG_DSN", hnsw_ef_search=None,
+                 schema: Optional[str] = None):
         self.dsn = dsn or os.environ.get(dsn_env)
         if not self.dsn:
             raise ValueError(
                 f"No Postgres DSN. Pass dsn=... or set ${dsn_env}, e.g. "
                 "postgresql://user:pass@localhost:5432/rag")
-        self.chunks = table
-        self.vectors = vectors_table
+        self.schema = (schema or "public").strip() or "public"
+        self.chunks = qualify_ident(table, self.schema)
+        self.vectors = qualify_ident(vectors_table, self.schema)
+        self.search_fn = qualify_ident("search_chunks", self.schema)
         self.dim = dim
         self.hnsw_ef_search = _coerce_ef_search(hnsw_ef_search)
+
+    @property
+    def is_public_schema(self) -> bool:
+        return self.schema.lower() in _PUBLIC_SCHEMAS or self.schema.lower() == "public"
 
     # -- connection --------------------------------------------------------
     def _connect(self):
@@ -371,6 +401,9 @@ class ChunkStore:
                 f"Underlying error: {_redact_secret(str(e), self.dsn)}") from e
         with conn, conn.cursor() as cur:
             _ensure_vector_extension(cur)
+            if not self.is_public_schema:
+                cur.execute(
+                    f"CREATE SCHEMA IF NOT EXISTS {_sql_ident(self.schema)}")
             pre = {}
             for t in (self.chunks, self.vectors):
                 cur.execute("SELECT to_regclass(%s)", (t,))
@@ -415,7 +448,8 @@ class ChunkStore:
                 );""")
             cur.execute(f"CREATE INDEX IF NOT EXISTS {self.vectors}_hnsw_idx "
                         f"ON {self.vectors} USING hnsw (embedding vector_cosine_ops);")
-            cur.execute(_search_chunks_ddl(self.chunks, self.vectors))
+            cur.execute(_search_chunks_ddl(
+                self.chunks, self.vectors, function=self.search_fn))
             conn.commit()
             for t in (self.chunks, self.vectors):
                 log.info("datastore table '%s': %s", t,
@@ -456,6 +490,22 @@ class ChunkStore:
             nulls,
         )
         return len(rows)
+
+    def delete_by_source_id(self, source_id: str) -> int:
+        """Delete every row for ``source_id``. Embeddings cascade.
+
+        Re-crawls can shift ``chunk_index`` (and therefore ``chunk_id``). A
+        bare upsert would leave orphan rows; delete-then-reingest is required.
+        """
+        with self._connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                f"DELETE FROM {self.chunks} WHERE source_id = %s",
+                (source_id,))
+            n = cur.rowcount or 0
+            conn.commit()
+        log.info("deleted %d row(s) from '%s' source_id=%s",
+                 n, self.chunks, source_id)
+        return n
 
     # -- embeddings (Phase 3) ---------------------------------------------
     def iter_missing_embeddings(self, batch: int = 256
@@ -620,7 +670,7 @@ class ChunkStore:
         """
         vec = "[" + ",".join(str(float(x)) for x in query_embedding) + "]"
         sql = (
-            "SELECT * FROM search_chunks("
+            f"SELECT * FROM {self.search_fn}("
             "%s, %s::vector, %s, %s, %s, %s, %s, %s)"
         )
         params = (
