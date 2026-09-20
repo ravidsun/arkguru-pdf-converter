@@ -1,0 +1,30 @@
+domain_name: "vedic-astrology"
+phase2:
+  seeds:
+    - "https://www.vedicastrologer.org/"
+    - "https://www.vedicastrologer.org/jh/index.htm"
+    - "https://www.vedicastrologer.org/articles/index.htm"
+    - "https://www.vedicastrologer.org/classes/index.htm"
+    - "https://www.vedicastrologer.org/predict/index.htm"
+    - "https://www.vedicastrologer.org/modules/banner_menu.htm"
+    - "https://astrolearn.co/"
+    - "https://astrolearn.co/blogs"
+    - "https://www.cosmicinsights.net/"
+    - "https://www.appliedjyotish.com/"
+  out_dir: "data/processed"
+  out_format: "jsonl"
+  max_pages: 320
+  max_pages_per_seed: 80
+  delay_seconds: 0.75
+  same_domain_only: true
+  backend: "local"
+  target_tokens: 550
+  overlap_pct: 0.15
+  min_tokens: 80
+  min_content_chars: 200
+  dedup: true
+  sink: "file"
+  datastore_config: "config/datastore.yaml"
+  download_pdfs: true
+  ingest_pdfs: true
+  pdf_dir: "data/raw_pdfs"

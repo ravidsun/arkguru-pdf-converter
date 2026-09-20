@@ -99,17 +99,20 @@ brew install tesseract ghostscript
 **Speed:** ~200–500 ms/page (local backend), ~1–3 s/page (firecrawl)
 
 **Key features:**
+- **Schema `web`:** `--sink postgres` writes `web.chunks` / `web.search_chunks` on the same `PG_DSN` as the books. It **refuses** `public`.
+- **Allowlisted BFS:** four free learning sites in `config/config.yaml`; `same_domain_only`, robots.txt, path denylist, Kundli-generator query skip
 - **Two fetch backends:** local (trafilatura + httpx, free), firecrawl (JS-heavy sites, paid)
-- **Breadth-first crawl:** BFS frontier with link discovery up to max_pages
-- **Structure-aware chunking:** Same `pack_windows` logic as Phase 1 → identical chunk sizes
+- **Structure-aware chunking:** Same `pack_windows` logic as Phase 1
 - **Near-dedup:** MinHash LSH collapses syndicated/similar pages (Jaccard ≥ 0.9)
+- **PDF harvest:** publicly linked `.pdf` files are downloaded and Phase-1 extracted into schema `web`
 
 **Example workflow:**
 ```bash
 cd arkguru-web-scraping
-# Point at your docs site
-python -m phase2_web.pipeline --seeds https://your.site/docs --max-pages 200
+python -m phase2_web.pipeline --config config/config.yaml
 # → data/processed/web_chunks.jsonl
+python -m phase2_web.pipeline --config config/config.yaml --sink postgres
+# → rag.web.chunks (DBeaver: schema web)
 ```
 
 **Backend decision:**
@@ -445,6 +448,9 @@ MIT (each repo independently licensed)
 
 **Q: Do I need Postgres?**  
 A: No. Start with local files (`data/store/*.jsonl`). Postgres is optional for scale (>100K chunks) and team sharing. File mode uses Python RRF; Postgres mode uses SQL `search_chunks()`.
+
+**Q: Where do Phase 2 web chunks go?**  
+A: Schema `web` on the same database (`web.chunks`, `web.search_chunks()`). They never land in `public.chunks`. DBeaver: open `rag` → schema `web`. `--sink postgres` refuses `schema: public`.
 
 **Q: How does hybrid retrieve work with Postgres?**  
 A: `ensure_schema()` installs `search_chunks()`. With `PG_DSN` set, `retrieve.py` / `serve.py` embed the query, call that function (HNSW + GIN FTS fused with RRF), then rerank and expand parents in Python. If the function is missing, `ChunkStore.search_chunks` runs `ensure_schema()` once and retries.
