@@ -1,0 +1,4 @@
+[submodule "arkguru-pdf-extraction"]
+	path = arkguru-pdf-extraction
+	url = https://github.com/ravidsun/arkguru-pdf-extraction.git
+	branch = develop
