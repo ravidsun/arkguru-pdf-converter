@@ -53,6 +53,21 @@ The script is idempotent. It:
 
 The virtualenv lives in `arkguru-pdf-converter/.venv`. Activate it before running any phase.
 
+### Local web UI (optional)
+
+A guided wizard wraps the same CLIs (async jobs + logs + chat). From the
+umbrella venv:
+
+```bash
+pip install -r arkguru-ui/requirements.txt
+cd arkguru-ui && make dev
+# http://127.0.0.1:5173
+```
+
+See [arkguru-ui/README.md](../arkguru-ui/README.md) for the smoke path
+(sample PDF → hashing embedder → extractive chat) and the Phase 1 submodule /
+sibling-clone layout.
+
 ### Full Phase 3 stack (optional)
 
 Real embeddings, LoRA fine-tuning, RAGAS eval, and Ollama generation:
