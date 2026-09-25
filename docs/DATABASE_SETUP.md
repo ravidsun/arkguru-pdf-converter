@@ -91,7 +91,7 @@ Postgres. If nothing answers:
 # native
 #   macOS: brew services start postgresql@16
 #   Linux: sudo pg_ctlcluster 16 main start
-#   Cloud: bash ../arkguru-common/scripts/start_services.sh
+#   Cloud: bash arkguru-common/scripts/start_services.sh
 # Docker
 docker compose up -d
 ```
@@ -347,7 +347,7 @@ cp .env.example .env
 # or: bash scripts/detect_local_pg.sh
 
 # Phase 3 example file also works; resolve_dsn walks parents to a git root
-# cp ../arkguru-rag-slm/.env.example ../arkguru-rag-slm/.env
+# cp arkguru-rag-slm/.env.example arkguru-rag-slm/.env
 ```
 
 To use different table names or dimension, edit `chunks_table`,

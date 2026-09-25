@@ -1,0 +1,41 @@
+domain_name: "example-domain"
+phase3:
+  combined_inputs:
+    - "data/processed/pdf_chunks.jsonl"   # <- from phase1-pdf-extraction
+    - "data/processed/web_chunks.jsonl"   # <- from phase2-web-scraping
+  base_model: "Qwen/Qwen2.5-3B-Instruct"
+  quantization: "int4"
+  lora:
+    rank: 16
+    alpha: 32
+    dropout: 0.05
+    target_modules: ["q_proj", "k_proj", "v_proj", "o_proj"]
+  train:
+    epochs: 3
+    lr: 2.0e-4
+    max_seq_len: 1024
+    batch_size: 1
+    grad_accum: 16
+  embedding_model: "BAAI/bge-m3"
+  # v2-m3 is a drop-in for the same CrossEncoder call and is the stronger
+  # multilingual reranker, which matters here because the corpus mixes English
+  # with transliterated Sanskrit. Not verifiable on a Cloud Agent: it needs
+  # sentence-transformers plus a model download, so confirm on the NUC.
+  reranker_model: "BAAI/bge-reranker-v2-m3"
+  datastore_config: "config/datastore.yaml"   # DB connection + table names
+  retrieval:
+    top_k_vector: 60         # needs datastore.yaml hnsw_ef_search >= this
+    top_k_bm25: 60
+    top_k_candidates: 120    # how many the cross-encoder gets to rerank
+    top_k_final: 6           # returned after rerank
+    use_parent_expansion: true
+    rewriter: noop           # noop | lexicon (see phase3_rag/rewrite.py)
+  serve:
+    backend: "ollama"
+    model_tag: "domain-slm"
+    ctx: 4096
+    faithfulness:
+      enabled: true
+      min_token_overlap: 0.4
+      min_sentence_tokens: 6
+      max_retries: 1

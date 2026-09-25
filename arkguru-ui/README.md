@@ -15,45 +15,19 @@ The wizard always takes the skip path: combine → index → chat.
 
 ## Layout this UI understands
 
-The umbrella repo (`arkguru-pdf-converter`) and the phase checkouts disagree
-on disk layout. `backend/paths.py` uses the same sibling-or-nested search as
-`scripts/setup_dev_env.sh`:
+Common, Phase 1, Phase 2, and Phase 3 are regular folders in this repo
+(`docs/LOCAL_RUN.md`). `backend/paths.py` still accepts a sibling checkout
+if you point `PHASE1_REPO` / `PHASE2_REPO` / `PHASE3_REPO` / `COMMON_REPO`
+or `ARKGURU_ROOT` at one (see `.env.example`).
 
 ```
-# Laptop / docs/LOCAL_RUN.md (siblings)
-some-dir/
+arkguru-pdf-converter/       # the only git clone
   arkguru-common/
-  arkguru-pdf-converter/          # this umbrella; .venv lives here
-    arkguru-common/               # vendored fallback
-    arkguru-web-scraping/         # Phase 2 source of truth (in-tree)
-    arkguru-ui/                   # this package
-  arkguru-pdf-extraction/         # Phase 1
-  arkguru-rag-slm/                # Phase 3
-
-# Also accepted: nested under the umbrella
-arkguru-pdf-converter/
-  arkguru-pdf-extraction/         # submodule and/or gitignored clone
-  arkguru-rag-slm/
+  arkguru-pdf-extraction/    # Phase 1 (in-tree)
+  arkguru-web-scraping/      # Phase 2 (in-tree)
+  arkguru-rag-slm/           # Phase 3 (in-tree)
+  arkguru-ui/                # this package
 ```
-
-**Submodule quirk:** `arkguru-pdf-extraction` is listed in `.gitmodules`
-(pinned commit) **and** in the umbrella `.gitignore` (nested sibling clones).
-A fresh clone of the umbrella often has an empty Phase 1 directory until you:
-
-```bash
-git submodule update --init arkguru-pdf-extraction
-# or
-git clone https://github.com/ravidsun/arkguru-pdf-extraction.git
-```
-
-Phase 3 may also appear as a gitlink in some umbrella checkouts even when it
-is absent from `.gitmodules`. Clone `arkguru-rag-slm` as a sibling (Cloud Agent
-`repositoryDependencies`) or nest it under the umbrella. Override any path
-with `PHASE1_REPO` / `PHASE2_REPO` / `PHASE3_REPO` / `COMMON_REPO` / `ARKGURU_ROOT`
-in `.env` (see `.env.example`). Do not commit a changed gitlink SHA from a
-local clone of those dirs.
-
-Phase 2 currently lives **in this umbrella** (`./arkguru-web-scraping`).
 
 ## Install
 
@@ -63,10 +37,6 @@ From the umbrella repo, with the existing venv (Python 3.9+):
 cd arkguru-pdf-converter
 bash scripts/setup_dev_env.sh
 source .venv/bin/activate
-
-# Phase 1 + Phase 3 checkouts (if the directories are empty)
-# git submodule update --init arkguru-pdf-extraction
-# git clone https://github.com/ravidsun/arkguru-rag-slm.git
 
 pip install -r arkguru-ui/requirements.txt
 cd arkguru-ui/frontend && npm install
@@ -154,8 +124,8 @@ vendored fallback).
 - **Ollama is optional.** Without it, answers are `[extractive]` top-hit text.
 - **Single-user, in-memory jobs.** Restarting the API drops the job list;
   logs under `arkguru-ui/data/jobs/` remain.
-- Empty Phase 1 / Phase 3 directories in a fresh umbrella clone are expected
-  until those repos are checked out.
+- Phase trees are in this repo. If a checkout is missing, `GET /api/health`
+  reports `found: false` until the folder is present.
 
 ## Tests
 

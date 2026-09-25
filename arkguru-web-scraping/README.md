@@ -26,7 +26,8 @@ python -m phase2_web.pipeline --config config/config.yaml
 python -m phase2_web.pipeline --config config/config.yaml --sink postgres
 ```
 
-First-pass seeds (Vedic learning sites) live in `config/config.yaml`.
+First-pass seeds (Vedic learning sites plus traditional Western article hubs)
+live in `config/config.yaml`. Commercial Kundli portals stay out.
 `max_pages_per_seed` defaults to 80. robots.txt is honored. Login/chat/cart
 paths and Kundli-generator query strings are skipped.
 

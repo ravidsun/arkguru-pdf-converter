@@ -6,24 +6,19 @@ The companion document is [CLOUD_RUN.md](CLOUD_RUN.md).
 
 ## Layout
 
-Clone the shared package, this umbrella repo, and the phase repos as **siblings**. `arkguru-common` is a first-class GitHub repo; this umbrella vendors a copy under `./arkguru-common`. Phase 2 lives **in this umbrella** for now (`./arkguru-web-scraping`); the public GitHub repo is not the source of truth.
+Clone **this repo only**. Common, Phase 1, Phase 2, and Phase 3 live as folders inside it. Standalone GitHub copies of those folders are historical, not the source of truth.
 
 ```
-some-dir/
-  arkguru-common/            # shared package (preferred)
-  arkguru-pdf-converter/     # this repo (env setup + vendored common + Phase 2)
-    arkguru-common/
-    arkguru-web-scraping/    # Phase 2 (source of truth for now)
+arkguru-pdf-converter/       # the only git clone
+  arkguru-common/            # shared package
   arkguru-pdf-extraction/    # Phase 1
+  arkguru-web-scraping/      # Phase 2
   arkguru-rag-slm/           # Phase 3
 ```
 
 ```bash
-mkdir -p ~/arkguru && cd ~/arkguru
-git clone https://github.com/ravidsun/arkguru-common.git
 git clone https://github.com/ravidsun/arkguru-pdf-converter.git
-git clone https://github.com/ravidsun/arkguru-pdf-extraction.git
-git clone https://github.com/ravidsun/arkguru-rag-slm.git
+cd arkguru-pdf-converter
 ```
 
 Python 3.9+ is required. On Debian/Ubuntu also install `python3-venv` (and `python3-pip` if needed).
@@ -47,8 +42,8 @@ source .venv/bin/activate
 The script is idempotent. It:
 
 1. Creates `.venv` in this repo (override with `ARKGURU_VENV`). On Debian/Ubuntu it installs `python3-venv` if `ensurepip` is missing.
-2. Installs `arkguru-common` from the sibling checkout when present, otherwise the vendored copy (`import common` works in every phase), including the **`postgres` extra** (`psycopg`, `pgvector`).
-3. Installs Phase 1 requirements plus `reportlab`, Postgres clients, and OCR (`ocrmypdf`, `pytesseract`, `pillow`). On Debian/Ubuntu it also installs system Tesseract and Ghostscript. Phase 2 requirements if that repo is checked out.
+2. Installs `arkguru-common` from `./arkguru-common` (`import common` works in every phase), including the **`postgres` extra** (`psycopg`, `pgvector`).
+3. Installs Phase 1 requirements plus `reportlab`, Postgres clients, and OCR (`ocrmypdf`, `pytesseract`, `pillow`). On Debian/Ubuntu it also installs system Tesseract and Ghostscript. Phase 2 requirements from `./arkguru-web-scraping`.
 4. Installs the **offline** Phase 3 core (`numpy`, `rank-bm25`) so retrieval works without downloading models.
 
 The virtualenv lives in `arkguru-pdf-converter/.venv`. Activate it before running any phase.
@@ -65,8 +60,8 @@ cd arkguru-ui && make dev
 ```
 
 See [arkguru-ui/README.md](../arkguru-ui/README.md) for the smoke path
-(sample PDF → hashing embedder → extractive chat) and the Phase 1 submodule /
-sibling-clone layout.
+(sample PDF → hashing embedder → extractive chat). The wizard uses the
+in-tree Phase 1 / 2 / 3 folders in this repo.
 
 ### Full Phase 3 stack (optional)
 
@@ -74,7 +69,7 @@ Real embeddings, LoRA fine-tuning, RAGAS eval, and Ollama generation:
 
 ```bash
 source .venv/bin/activate
-pip install -r ../arkguru-rag-slm/requirements.txt
+pip install -r arkguru-rag-slm/requirements.txt
 ```
 
 That pull is large (transformers, sentence-transformers, FlagEmbedding, ragas, llama-index). Skip it until you need it.
@@ -84,14 +79,13 @@ That pull is large (transformers, sentence-transformers, FlagEmbedding, ragas, l
 With the venv activated:
 
 ```bash
-# Shared package (sibling checkout; fall back to ./arkguru-common/tests)
-python -m pytest ../arkguru-common/tests -q
+python -m pytest arkguru-common/tests -q
 ```
 
 ### Phase 1 — PDF → chunks
 
 ```bash
-cd ../arkguru-pdf-extraction
+cd arkguru-pdf-extraction
 python scripts/make_sample_pdf.py     # data/raw_pdfs/sample_handbook.pdf
 make phase1                           # data/processed/sample_handbook/chunks.jsonl
 ```
@@ -100,10 +94,11 @@ Drop your own PDFs in `data/raw_pdfs/` and re-run `make phase1`.
 
 ### Phase 2 — URLs → chunks (schema `web`)
 
-Default seeds are four free Vedic learning sites (`vedicastrologer.org`,
-`astrolearn.co`, `cosmicinsights.net`, `appliedjyotish.com`). Postgres writes
-go to **`web.chunks`**, never `public.chunks`. `--sink postgres` exits if
-`config/datastore.yaml` has `schema: public`.
+Default seeds are astrology article hubs in `config/config.yaml` (Vedic
+learning sites plus traditional Western encyclopedias; commercial Kundli
+portals stay out). Postgres writes go to **`web.chunks`**, never
+`public.chunks`. `--sink postgres` exits if `config/datastore.yaml` has
+`schema: public`.
 
 ```bash
 cd ../arkguru-web-scraping
@@ -181,7 +176,7 @@ Native DSN on **5432**, Docker DSN on **5433** (`bash scripts/detect_local_pg.sh
 ```bash
 export PG_DSN=postgresql://rag:change-me@127.0.0.1:5433/rag   # Docker; native uses :5432
 # or Session pooler URI
-cd ../arkguru-pdf-extraction
+cd arkguru-pdf-extraction
 python scripts/make_sample_pdf.py
 python -m phase1_pdf.pipeline --init-db
 python -m phase1_pdf.pipeline --input data/raw_pdfs --sink postgres --workers 1
@@ -230,7 +225,7 @@ psql "$PG_DSN" -c "CREATE EXTENSION IF NOT EXISTS vector;"
 3. Ingest to files or `--sink postgres`:
 
 ```bash
-cd ../arkguru-pdf-extraction
+cd arkguru-pdf-extraction
 python -m phase1_pdf.pipeline --input data/raw_pdfs --sink postgres
 
 cd ../arkguru-web-scraping
@@ -275,7 +270,7 @@ python -m phase3_rag.serve
 | Symptom | Fix |
 |---|---|
 | `ModuleNotFoundError: common` | Activate `.venv` created by `scripts/setup_dev_env.sh`, or `pip install -e arkguru-common` |
-| Phase repo not found during setup | Clone it as a **sibling** of `arkguru-pdf-converter` |
+| Phase folder not found during setup | Confirm you cloned `arkguru-pdf-converter` and the nested `arkguru-*` folders are present |
 | Empty Phase 1 output | Scanned PDF — confirm `tesseract --version` and `ocr_enabled: true` (setup installs OCR on Debian/Ubuntu) |
 | Blank Phase 2 pages | JS site — switch to `backend: firecrawl` |
 | Ollama errors | Start `ollama serve`; extractive answers still work without it |

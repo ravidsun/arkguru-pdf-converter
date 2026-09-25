@@ -1,14 +1,10 @@
 """Locate the umbrella repo and each phase checkout.
 
-Cloud Agents and laptop clones disagree on layout:
-
-* Cloud / sibling: ``../arkguru-pdf-extraction`` next to this umbrella
-* Nested: ``./arkguru-pdf-extraction`` inside the umbrella (submodule or clone)
-* Phase 2 currently lives **in this umbrella** (``./arkguru-web-scraping``)
-
-``arkguru-pdf-extraction`` is listed in ``.gitmodules`` **and** in the
-umbrella ``.gitignore`` (nested sibling clones). The wizard accepts either
-and never assumes the submodule was initialized.
+The source of truth is in-tree folders under this umbrella
+(``./arkguru-pdf-extraction``, ``./arkguru-web-scraping``,
+``./arkguru-rag-slm``, ``./arkguru-common``). A sibling checkout is still
+accepted when ``PHASE*_REPO`` / ``COMMON_REPO`` / ``ARKGURU_ROOT`` is set,
+or when the same repo name exists next to the umbrella.
 """
 
 from __future__ import annotations

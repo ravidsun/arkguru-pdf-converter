@@ -66,9 +66,8 @@ def health() -> dict[str, Any]:
         "pg_dsn_set": pg_dsn_set(),
         "ollama": ollama,
         "notes": [
-            "arkguru-pdf-extraction may be a git submodule and is also listed "
-            "in the umbrella .gitignore (sibling clones). Either layout works.",
-            "Phase 2 currently lives in this umbrella (./arkguru-web-scraping).",
+            "Phase 1/2/3 and common are in-tree folders in this umbrella.",
+            "Sibling checkouts still work if PHASE*_REPO / COMMON_REPO is set.",
             "Fine-tune is CLI-only: cd arkguru-rag-slm && make finetune.",
         ],
     }

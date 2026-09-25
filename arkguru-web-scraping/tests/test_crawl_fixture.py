@@ -48,3 +48,33 @@ def test_crawl_local_fixture_respects_deny_and_same_site():
     assert "seventh house" in bodies
     assert "should not fetch" not in bodies
     assert all("evil.example" not in p.url for p in result.pages)
+
+
+def test_crawl_counts_http_errors_toward_per_seed_budget():
+    """Broken sitemaps must not fetch unbounded 404s after the seed cap."""
+    hits = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        hits["n"] += 1
+        path = request.url.path
+        if path == "/robots.txt":
+            return httpx.Response(200, text="User-agent: *\nAllow: /\n")
+        if path == "/":
+            anchors = "".join(f'<a href="/missing/{i}">x</a>' for i in range(40))
+            html = f"<!DOCTYPE html><html><body><p>Seed page.</p>{anchors}</body></html>"
+            return httpx.Response(200, headers={"content-type": "text/html"}, content=html.encode())
+        return httpx.Response(404)
+
+    transport = httpx.MockTransport(handler)
+    client = httpx.Client(transport=transport, follow_redirects=True)
+    result = crawl(
+        ["http://fixture.test/"],
+        max_pages=100,
+        max_pages_per_seed=5,
+        delay_seconds=0,
+        client=client,
+    )
+    assert len(result.pages) == 1
+    assert result.skipped >= 4
+    # robots + seed + 4 errors (budget 5), not 40 missing links
+    assert hits["n"] <= 8

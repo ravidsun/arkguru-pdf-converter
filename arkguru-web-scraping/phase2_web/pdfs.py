@@ -73,7 +73,7 @@ def ingest_pdfs_with_phase1(
 ) -> int:
     """Run Phase 1 against downloaded PDFs using Phase 2's datastore.yaml.
 
-    Requires ``arkguru-pdf-extraction`` on ``sys.path`` (sibling checkout).
+    Requires ``arkguru-pdf-extraction`` on ``sys.path`` (nested folder in this repo).
     """
     from pathlib import Path as P
     import sys
@@ -92,7 +92,7 @@ def ingest_pdfs_with_phase1(
             break
     else:
         raise RuntimeError(
-            "arkguru-pdf-extraction not found; clone it as a sibling to ingest PDFs"
+            "arkguru-pdf-extraction not found; expected it next to this phase folder"
         )
     from phase1_pdf.pipeline import Phase1Config, run
 
