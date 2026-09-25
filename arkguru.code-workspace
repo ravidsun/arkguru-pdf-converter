@@ -18,9 +18,8 @@
     }
   ],
   "settings": {
-    "git.autoRepositoryDetection": true,
-    "git.detectSubmodules": true,
-    "git.detectSubmodulesLimit": 10,
+    "git.autoRepositoryDetection": false,
+    "git.detectSubmodules": false,
     "git.repositoryScanMaxDepth": 1
   }
 }

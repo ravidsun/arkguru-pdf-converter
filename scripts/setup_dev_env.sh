@@ -2,34 +2,29 @@
 #
 # Set up the arkguru development environment.
 #
-# Phase repos (arkguru-pdf-extraction, optional arkguru-web-scraping,
-# arkguru-rag-slm) import the shared `common` package from arkguru-common.
-# Prefer a sibling checkout of arkguru-common when present (first-class GitHub
-# repo); fall back to the copy vendored under ./arkguru-common.
+# This repo is the only checkout. Phase folders (arkguru-pdf-extraction,
+# arkguru-web-scraping, arkguru-rag-slm) and arkguru-common live nested here.
+# They import the shared `common` package from ./arkguru-common.
 #
 # This script is idempotent and safe to re-run.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PARENT_DIR="$(dirname "$REPO_ROOT")"
 VENV_DIR="${ARKGURU_VENV:-$REPO_ROOT/.venv}"
 
 PHASES=(arkguru-pdf-extraction arkguru-web-scraping arkguru-rag-slm)
 
 log() { printf '\n\033[1;34m[setup]\033[0m %s\n' "$*"; }
 
-# --- Locate sibling or nested checkouts ------------------------------------
-# Cloud Agents check out repos as flat siblings; local clones may nest them
-# under this umbrella repo. Support both.
+# --- Locate nested phase folders -------------------------------------------
 find_checkout() {
   local name="$1"
   local marker="$2"
-  for candidate in "$PARENT_DIR/$name" "$REPO_ROOT/$name"; do
-    if [ -f "$candidate/$marker" ]; then
-      echo "$candidate"
-      return 0
-    fi
-  done
+  local candidate="$REPO_ROOT/$name"
+  if [ -f "$candidate/$marker" ]; then
+    echo "$candidate"
+    return 0
+  fi
   return 1
 }
 
@@ -81,7 +76,7 @@ python -m pip install --upgrade pip setuptools wheel >/dev/null
 
 # --- 2. Shared package -------------------------------------------------------
 if ! COMMON_DIR="$(find_common)"; then
-  log "ERROR: could not find arkguru-common (sibling checkout or ./arkguru-common)."
+  log "ERROR: could not find $REPO_ROOT/arkguru-common."
   exit 1
 fi
 log "Installing arkguru-common from $COMMON_DIR (schema/tokenizer/chunking/datastore/worker/rrf)"
@@ -119,7 +114,7 @@ for name in "${PHASES[@]}"; do
       *) install_reqs "$repo" ;;
     esac
   else
-    log "WARNING: could not find $name (skipping). Clone it as a sibling of this repo."
+    log "WARNING: could not find $REPO_ROOT/$name (skipping)."
   fi
 done
 

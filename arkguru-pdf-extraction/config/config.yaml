@@ -1,0 +1,20 @@
+domain_name: "example-domain"
+phase1:
+  input_dir: "data/raw_pdfs"
+  out_dir: "data/processed"     # data/processed/{relative_stem}/chunks.jsonl (+ parents/tables/figures if any)
+  out_format: "jsonl"        # jsonl | parquet
+  backend: "pymupdf4llm"     # pymupdf4llm (fast) | docling (tables) | pymupdf (raw)
+  strategy: "structure"      # structure | parent_child | semantic
+  target_tokens: 400         # smaller windows -> more precise retrieval
+  overlap_pct: 0.15
+  min_tokens: 80             # merge trailing slivers smaller than this
+  parent_max_tokens: 2000
+  ocr_enabled: true          # OCRs scanned pages; safe on mixed scanned/native PDFs
+  extract_tables: true       # pull tables out as their own markdown chunks
+  extract_figures: true      # OCR embedded diagrams/charts/graphs (needs pytesseract)
+  dedup: true
+  # --- scaling ---
+  workers: 0             # 0 = auto (cpu_count-1); 1 = single process
+  # --- datastore sink (optional; default writes files to out_dir) ---
+  sink: "file"           # file | postgres  (connection/tables -> config/datastore.yaml)
+  datastore_config: "config/datastore.yaml"
