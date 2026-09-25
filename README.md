@@ -10,10 +10,29 @@
 **How to run:**
 
 - `make ui` — local web UI at http://127.0.0.1:8080 (trigger Phase 1 / 2 / 3)
+- [Run the UI locally](#run-the-ui-locally) — clone, venv, `make ui`, then click phases
 - [arkguru-ui/README.md](arkguru-ui/README.md) — UI details (HTML on :8080; optional React wizard)
 - [docs/LOCAL_RUN.md](docs/LOCAL_RUN.md) — laptop / NUC / workstation (venv, file sink, optional Postgres + Ollama)
 - [docs/CLOUD_RUN.md](docs/CLOUD_RUN.md) — Cursor Cloud Agent (`.cursor/environment.json` + `scripts/setup_dev_env.sh`)
 - Hybrid retrieve implementation: [`arkguru-common/common/datastore.py`](arkguru-common/common/datastore.py) — `ensure_schema()` installs SQL `search_chunks()`
+
+---
+
+## Run the UI locally
+
+From a clean checkout:
+
+```bash
+git clone https://github.com/ravidsun/arkguru-pdf-converter.git
+cd arkguru-pdf-converter
+bash scripts/setup_dev_env.sh
+source .venv/bin/activate
+make ui
+```
+
+Open http://127.0.0.1:8080. Use **Run Phase 1**, **Run Phase 2**, **Run embed**, or **Ask**. Live logs stream on the page. One job at a time. The server binds to 127.0.0.1 only.
+
+`setup_dev_env.sh` installs FastAPI and uvicorn into `.venv`. Optional `PG_DSN` goes in `.env` (copy from `.env.example`). More detail: [arkguru-ui/README.md](arkguru-ui/README.md).
 
 ---
 
@@ -487,6 +506,7 @@ A: Phase 3 includes `eval_ragas.py`, which computes context precision/recall/fai
 
 ## Quick links
 
+- [Run the UI locally](#run-the-ui-locally) — clone, venv, `make ui`, http://127.0.0.1:8080
 - [Local run](docs/LOCAL_RUN.md) — clone layout, venv, smoke test, production-style local stack
 - [Cloud run](docs/CLOUD_RUN.md) — Cursor Cloud Agent install, layout, constraints
 - [Phase 1 README](arkguru-pdf-extraction/README.md) — detailed extraction, OCR, chunking strategies
