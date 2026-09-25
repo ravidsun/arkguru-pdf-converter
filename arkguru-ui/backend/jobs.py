@@ -21,6 +21,10 @@ OnComplete = Callable[["Job"], dict[str, Any]]
 _LOCK = threading.Lock()
 
 
+class JobBusy(RuntimeError):
+    """Raised when a second job is started while one is queued or running."""
+
+
 @dataclass
 class Job:
     id: str
@@ -63,8 +67,9 @@ class Job:
 
 
 class JobRunner:
-    def __init__(self) -> None:
+    def __init__(self, *, allow_overlap: bool = False) -> None:
         self._jobs: dict[str, Job] = {}
+        self.allow_overlap = allow_overlap
 
     def get(self, job_id: str) -> Optional[Job]:
         with _LOCK:
@@ -73,6 +78,13 @@ class JobRunner:
     def list(self) -> list[Job]:
         with _LOCK:
             return sorted(self._jobs.values(), key=lambda j: j.created_at, reverse=True)
+
+    def current(self) -> Optional[Job]:
+        with _LOCK:
+            for job in self._jobs.values():
+                if job.status in ("queued", "running"):
+                    return job
+        return None
 
     def start(
         self,
@@ -94,6 +106,12 @@ class JobRunner:
             log_path=str(log_path) if log_path else None,
         )
         with _LOCK:
+            if not self.allow_overlap:
+                for existing in self._jobs.values():
+                    if existing.status in ("queued", "running"):
+                        raise JobBusy(
+                            f"job {existing.id} ({existing.kind}) is {existing.status}"
+                        )
             self._jobs[job.id] = job
         thread = threading.Thread(target=self._run, args=(job,), daemon=True)
         thread.start()

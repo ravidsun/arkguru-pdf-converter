@@ -50,6 +50,24 @@ def test_phase1_missing_input_dir():
     assert r.status_code == 400
 
 
+def test_index_html_served():
+    r = client.get("/")
+    assert r.status_code == 200
+    assert "Run Phase 1" in r.text
+    assert "Run Phase 2" in r.text
+
+
+def test_unified_phase2_requires_seeds():
+    r = client.post("/api/jobs", json={"phase": "phase2", "seeds": []})
+    assert r.status_code == 400
+
+
+def test_current_job_empty():
+    r = client.get("/api/jobs/current")
+    assert r.status_code == 200
+    assert "job" in r.json()
+
+
 def test_unknown_job_404():
     r = client.get("/api/jobs/not-a-real-job")
     assert r.status_code == 404

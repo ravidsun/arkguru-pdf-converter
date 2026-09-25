@@ -11,15 +11,22 @@ from typing import Any
 import httpx
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 
 from .adapters import phase1 as phase1_ad
 from .adapters import phase2 as phase2_ad
 from .adapters import phase3 as phase3_ad
+from .commands import build_job_spec
 from .corpus import count_jsonl_files
-from .jobs import RUNNER
-from .models import ChatRequest, Phase1Request, Phase2Request, Phase3Request
-from .paths import discover
+from .jobs import JobBusy, RUNNER
+from .models import (
+    ChatRequest,
+    Phase1Request,
+    Phase2Request,
+    Phase3Request,
+    UnifiedJobRequest,
+)
+from .paths import UI_ROOT, discover
 from .settings import load_env, ollama_host, pg_dsn_set, uploads_dir
 
 load_env()
@@ -32,6 +39,8 @@ app.add_middleware(
         "http://localhost:5173",
         "http://127.0.0.1:4173",
         "http://localhost:4173",
+        "http://127.0.0.1:8080",
+        "http://localhost:8080",
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -39,8 +48,19 @@ app.add_middleware(
 )
 
 
+STATIC_DIR = UI_ROOT / "static"
+
+
 def _layout():
     return discover()
+
+
+@app.get("/")
+def index() -> FileResponse:
+    page = STATIC_DIR / "index.html"
+    if not page.is_file():
+        raise HTTPException(404, "arkguru-ui/static/index.html is missing")
+    return FileResponse(page)
 
 
 def _repo_info(path: Path | None) -> dict[str, Any]:
@@ -123,10 +143,40 @@ async def uploads(files: list[UploadFile] = File(...)) -> dict[str, Any]:
     return {"dir": str(dest), "files": saved}
 
 
+@app.post("/api/jobs")
+def start_unified_job(req: UnifiedJobRequest) -> dict[str, Any]:
+    layout = _layout()
+    try:
+        spec = build_job_spec(layout, req)
+        extra = [spec.cwd]
+        env = {"PYTHONPATH": layout.pythonpath(*extra)}
+        job = RUNNER.start(spec.kind, spec.argv, cwd=spec.cwd, env=env)
+    except JobBusy as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"job": job.to_dict()}
+
+
+@app.get("/api/jobs/current")
+def current_job() -> dict[str, Any]:
+    job = RUNNER.current()
+    return {"job": None if job is None else job.to_dict(log_limit=80)}
+
+
+@app.get("/api/jobs/{job_id}/log")
+async def job_log(job_id: str) -> StreamingResponse:
+    return await stream_job(job_id)
+
+
 @app.post("/api/jobs/sample-pdf")
 def start_sample_pdf() -> dict[str, Any]:
     try:
         job = phase1_ad.start_sample_pdf(_layout())
+    except JobBusy as exc:
+        raise HTTPException(409, str(exc)) from exc
     except FileNotFoundError as exc:
         raise HTTPException(409, str(exc)) from exc
     return {"job": job.to_dict()}
@@ -142,6 +192,8 @@ def start_phase1(req: Phase1Request) -> dict[str, Any]:
         raise HTTPException(400, f"PDF input path does not exist: {input_dir}")
     try:
         job = phase1_ad.start_phase1(layout, req, input_dir=input_dir)
+    except JobBusy as exc:
+        raise HTTPException(409, str(exc)) from exc
     except FileNotFoundError as exc:
         raise HTTPException(409, str(exc)) from exc
     return {"job": job.to_dict()}
@@ -151,6 +203,8 @@ def start_phase1(req: Phase1Request) -> dict[str, Any]:
 def start_phase2(req: Phase2Request) -> dict[str, Any]:
     try:
         job = phase2_ad.start_phase2(_layout(), req)
+    except JobBusy as exc:
+        raise HTTPException(409, str(exc)) from exc
     except FileNotFoundError as exc:
         raise HTTPException(409, str(exc)) from exc
     except ValueError as exc:
@@ -162,6 +216,8 @@ def start_phase2(req: Phase2Request) -> dict[str, Any]:
 def start_phase3(req: Phase3Request) -> dict[str, Any]:
     try:
         job = phase3_ad.start_phase3(_layout(), req)
+    except JobBusy as exc:
+        raise HTTPException(409, str(exc)) from exc
     except FileNotFoundError as exc:
         raise HTTPException(409, str(exc)) from exc
     except RuntimeError as exc:

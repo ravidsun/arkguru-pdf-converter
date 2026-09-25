@@ -48,20 +48,23 @@ The script is idempotent. It:
 
 The virtualenv lives in `arkguru-pdf-converter/.venv`. Activate it before running any phase.
 
-### Local web UI (optional)
+### Local web UI
 
-A guided wizard wraps the same CLIs (async jobs + logs + chat). From the
-umbrella venv:
+Start one server and click Phase 1 / 2 / 3 (embed or ask). Live logs stream
+in the page. No npm required:
 
 ```bash
-pip install -r arkguru-ui/requirements.txt
-cd arkguru-ui && make dev
-# http://127.0.0.1:5173
+source .venv/bin/activate
+make ui
+# http://127.0.0.1:8080
 ```
 
-See [arkguru-ui/README.md](../arkguru-ui/README.md) for the smoke path
-(sample PDF → hashing embedder → extractive chat). The wizard uses the
-in-tree Phase 1 / 2 / 3 folders in this repo.
+`setup_dev_env.sh` installs FastAPI and uvicorn. The UI shells out to the
+same phase CLIs. One job at a time. Bind is 127.0.0.1 only.
+
+Optional React wizard (needs `npm install` in `arkguru-ui/frontend`):
+`cd arkguru-ui && make frontend` on port 5173. See
+[arkguru-ui/README.md](../arkguru-ui/README.md).
 
 ### Full Phase 3 stack (optional)
 

@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>arkguru — run phases</title>
+  <style>
+    :root { font-family: ui-sans-serif, system-ui, sans-serif; color: #102027; background: #f4f1ea; }
+    body { max-width: 960px; margin: 1.5rem auto; padding: 0 1rem; }
+    h1 { font-size: 1.4rem; margin: 0 0 0.25rem; }
+    .sub { color: #546e7a; margin-bottom: 1.25rem; }
+    .grid { display: grid; gap: 0.9rem; }
+    @media (min-width: 800px) { .grid { grid-template-columns: 1fr 1fr; } }
+    section { background: #fff; border: 1px solid #d7d2c8; border-radius: 10px; padding: 0.9rem 1rem; }
+    section h2 { font-size: 1rem; margin: 0 0 0.6rem; }
+    label { display: block; font-size: 0.8rem; color: #455a64; margin: 0.4rem 0 0.15rem; }
+    input, select, textarea { width: 100%; box-sizing: border-box; padding: 0.4rem 0.5rem; border: 1px solid #b0bec5; border-radius: 6px; font: inherit; }
+    textarea { min-height: 5.5rem; font-family: ui-monospace, monospace; font-size: 0.78rem; }
+    button { margin-top: 0.65rem; padding: 0.45rem 0.8rem; border: 0; border-radius: 6px; background: #1b5e4a; color: #fff; font-weight: 600; cursor: pointer; }
+    button:disabled { background: #90a4ae; cursor: not-allowed; }
+    #status { font-size: 0.85rem; margin: 1rem 0 0.4rem; }
+    #log { background: #102027; color: #c8e6c9; padding: 0.75rem; border-radius: 8px; min-height: 16rem; overflow: auto; white-space: pre-wrap; font: 0.75rem/1.4 ui-monospace, monospace; }
+    .err { color: #b71c1c; }
+  </style>
+</head>
+<body>
+  <h1>arkguru phases</h1>
+  <p class="sub">Local UI on 127.0.0.1. One job at a time. Same CLIs as <code>make phase1</code> / Phase 2 / Phase 3.</p>
+  <div class="grid">
+    <section>
+      <h2>Phase 1 — PDF extract</h2>
+      <label for="p1-input">PDF folder</label>
+      <input id="p1-input" />
+      <label for="p1-sink">Sink</label>
+      <select id="p1-sink"><option value="file">file</option><option value="postgres">postgres</option></select>
+      <button type="button" data-phase="phase1">Run Phase 1</button>
+    </section>
+    <section>
+      <h2>Phase 2 — web crawl</h2>
+      <label for="p2-seeds">Seeds (one URL per line)</label>
+      <textarea id="p2-seeds"></textarea>
+      <label for="p2-max">Max pages</label>
+      <input id="p2-max" type="number" value="8" min="1" />
+      <label for="p2-sink">Sink</label>
+      <select id="p2-sink"><option value="file">file</option><option value="postgres">postgres</option></select>
+      <button type="button" data-phase="phase2">Run Phase 2</button>
+    </section>
+    <section>
+      <h2>Phase 3 — embed</h2>
+      <p class="sub">Hashing embedder (Cloud-safe). Needs chunks already in Postgres for the postgres path.</p>
+      <button type="button" data-phase="phase3_embed">Run embed</button>
+    </section>
+    <section>
+      <h2>Phase 3 — ask</h2>
+      <label for="p3-q">Question</label>
+      <input id="p3-q" value="What PPE is required before servicing a unit?" />
+      <button type="button" data-phase="phase3_ask">Ask</button>
+    </section>
+  </div>
+  <p id="status">No job running.</p>
+  <pre id="log"></pre>
+  <script>
+    const statusEl = document.getElementById("status");
+    const logEl = document.getElementById("log");
+    let source = null;
+
+    async function loadDefaults() {
+      const r = await fetch("/api/defaults");
+      const d = await r.json();
+      document.getElementById("p1-input").value = d.phase1_input || "arkguru-pdf-extraction/data/raw_pdfs";
+      document.getElementById("p2-seeds").value = (d.phase2_seeds || []).join("\n");
+    }
+
+    function setBusy(busy) {
+      document.querySelectorAll("button[data-phase]").forEach((b) => { b.disabled = busy; });
+    }
+
+    function appendLines(lines) {
+      if (!lines || !lines.length) return;
+      logEl.textContent += lines.join("\n") + "\n";
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    function watch(jobId) {
+      if (source) source.close();
+      source = new EventSource("/api/jobs/" + jobId + "/log");
+      source.onmessage = (ev) => {
+        try { appendLines(JSON.parse(ev.data)); } catch (_) { appendLines([ev.data]); }
+      };
+      source.addEventListener("done", (ev) => {
+        try {
+          const job = JSON.parse(ev.data);
+          statusEl.textContent = "Job " + job.id + " " + job.status + (job.error ? " — " + job.error : "");
+        } catch (_) {
+          statusEl.textContent = "Job finished.";
+        }
+        source.close();
+        setBusy(false);
+      });
+      source.onerror = () => { source.close(); setBusy(false); };
+    }
+
+    async function start(phase) {
+      const body = { phase };
+      if (phase === "phase1") {
+        body.input_dir = document.getElementById("p1-input").value;
+        body.sink = document.getElementById("p1-sink").value;
+      } else if (phase === "phase2") {
+        body.seeds = document.getElementById("p2-seeds").value.split("\n").map((s) => s.trim()).filter(Boolean);
+        body.max_pages = Number(document.getElementById("p2-max").value) || 8;
+        body.sink = document.getElementById("p2-sink").value;
+      } else if (phase === "phase3_ask") {
+        body.question = document.getElementById("p3-q").value;
+      }
+      statusEl.textContent = "Starting " + phase + "…";
+      statusEl.classList.remove("err");
+      logEl.textContent = "";
+      setBusy(true);
+      const r = await fetch("/api/jobs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await r.json();
+      if (!r.ok) {
+        statusEl.textContent = data.detail || r.statusText;
+        statusEl.classList.add("err");
+        setBusy(false);
+        return;
+      }
+      statusEl.textContent = "Running " + data.job.kind + " (" + data.job.id + ")";
+      watch(data.job.id);
+    }
+
+    document.querySelectorAll("button[data-phase]").forEach((btn) => {
+      btn.addEventListener("click", () => start(btn.dataset.phase));
+    });
+    loadDefaults().catch((err) => {
+      statusEl.textContent = "Could not load defaults: " + err;
+      statusEl.classList.add("err");
+    });
+  </script>
+</body>
+</html>

@@ -2,9 +2,17 @@
 
 from __future__ import annotations
 
+from enum import Enum
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
+
+
+class PhaseName(str, Enum):
+    phase1 = "phase1"
+    phase2 = "phase2"
+    phase3_embed = "phase3_embed"
+    phase3_ask = "phase3_ask"
 
 Phase1Backend = Literal["pymupdf4llm", "docling", "pymupdf"]
 Phase1Strategy = Literal["structure", "parent_child", "semantic"]
@@ -50,6 +58,15 @@ class Phase3Request(BaseModel):
     skip_finetune: bool = True
     store: str | None = None
     processed_dir: str | None = None
+
+
+class UnifiedJobRequest(BaseModel):
+    phase: PhaseName
+    input_dir: str | None = None
+    sink: Sink = "file"
+    seeds: list[str] | None = None
+    max_pages: int | None = None
+    question: str | None = None
 
 
 class ChatRequest(BaseModel):

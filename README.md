@@ -9,7 +9,8 @@
 
 **How to run:**
 
-- [arkguru-ui/README.md](arkguru-ui/README.md) — local web wizard (FastAPI + React) over the same phase CLIs
+- `make ui` — local web UI at http://127.0.0.1:8080 (trigger Phase 1 / 2 / 3)
+- [arkguru-ui/README.md](arkguru-ui/README.md) — UI details (HTML on :8080; optional React wizard)
 - [docs/LOCAL_RUN.md](docs/LOCAL_RUN.md) — laptop / NUC / workstation (venv, file sink, optional Postgres + Ollama)
 - [docs/CLOUD_RUN.md](docs/CLOUD_RUN.md) — Cursor Cloud Agent (`.cursor/environment.json` + `scripts/setup_dev_env.sh`)
 - Hybrid retrieve implementation: [`arkguru-common/common/datastore.py`](arkguru-common/common/datastore.py) — `ensure_schema()` installs SQL `search_chunks()`

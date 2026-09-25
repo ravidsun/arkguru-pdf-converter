@@ -12,6 +12,12 @@ def test_setup_installs_ocr_system_packages():
     assert "ghostscript" in text
 
 
+def test_setup_installs_ui_fastapi():
+    text = _SETUP.read_text()
+    assert "arkguru-ui/requirements.txt" in text
+    assert "fastapi" in text.lower() or "arkguru-ui" in text
+
+
 def test_setup_pips_ocrmypdf_stack_for_phase1():
     text = _SETUP.read_text()
     assert "ocrmypdf>=16.0" in text

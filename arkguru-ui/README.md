@@ -54,17 +54,26 @@ whether it is **set**, never the value.
 
 ## Run
 
+From the umbrella repo (no npm):
+
+```bash
+source .venv/bin/activate
+make ui
+# http://127.0.0.1:8080
+```
+
+The page posts `POST /api/jobs` (`phase1` | `phase2` | `phase3_embed` |
+`phase3_ask`) and streams `GET /api/jobs/{id}/log`. One job at a time.
+
+Optional React wizard (needs Node):
+
 ```bash
 cd arkguru-ui
 make dev          # API :8765 + Vite :5173
 # or separately:
 make api          # http://127.0.0.1:8765/api/health
-make ui           # http://127.0.0.1:5173  (proxies /api)
+make frontend     # http://127.0.0.1:5173  (proxies /api)
 ```
-
-Open `http://127.0.0.1:5173`. Long jobs (OCR, crawl, index) run in a
-background thread; the UI polls `/api/jobs/{id}` and can stream
-`/api/jobs/{id}/stream`.
 
 ## Smoke path (offline, no Postgres, no Ollama)
 

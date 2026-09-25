@@ -118,4 +118,9 @@ for name in "${PHASES[@]}"; do
   fi
 done
 
+if [ -f "$REPO_ROOT/arkguru-ui/requirements.txt" ]; then
+  log "Installing arkguru-ui (FastAPI + uvicorn)"
+  pip install -r "$REPO_ROOT/arkguru-ui/requirements.txt"
+fi
+
 log "Done. Activate with:  source \"$VENV_DIR/bin/activate\""
