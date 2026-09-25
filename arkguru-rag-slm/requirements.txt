@@ -1,0 +1,24 @@
+# Shared schema / datastore / chunking (sibling package)
+-e ../arkguru-common
+numpy>=1.24
+# Phase 3 - Local fine-tune + RAG (CPU now, GPU-ready later)
+# Fine-tuning (CPU QLoRA)
+transformers>=4.44
+peft>=0.12
+datasets>=2.20
+accelerate>=0.33
+# CPU-optimized 4-bit training on Intel Core Ultra. Pick ONE stack:
+#   A) intel-extension-for-transformers  (QLoRA on CPU, INT4/NF4)
+#   B) ipex-llm[all]                      (Intel's actively-maintained successor)
+# intel-extension-for-transformers>=1.4
+# ipex-llm>=2.1.0
+# Embeddings + retrieval
+sentence-transformers>=3.0
+FlagEmbedding>=1.2       # bge-m3 / bge-reranker
+rank-bm25>=0.2.2         # lexical BM25 (or use Postgres FTS)
+psycopg[binary]>=3.2     # pgvector via PostgreSQL
+pgvector>=0.3
+# Orchestration + eval + serving
+llama-index>=0.11        # (or langchain>=0.3)
+ragas>=0.1.9
+# Inference: install Ollama (https://ollama.com) or build llama.cpp separately

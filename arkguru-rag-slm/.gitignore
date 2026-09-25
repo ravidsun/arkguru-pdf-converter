@@ -1,7 +1,5 @@
-.venv/
 __pycache__/
 *.pyc
-*.egg-info/
 data/raw_pdfs/*
 data/interim/*
 data/processed/*
@@ -9,4 +7,7 @@ data/processed/*
 artifacts/
 *.gguf
 *.parquet
+.venv/
+
 .env
+data/backups/

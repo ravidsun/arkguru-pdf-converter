@@ -1,0 +1,21 @@
+# End-to-end pipeline WITHOUT a database (offline file mode). Proves the full
+# path on a single PDF: Phase 1 ingests -> Phase 3 answers from data/processed
+# JSONL via BM25/vector fallback. Phase 2 (web) is independent of a PDF input and
+# stays disabled here. For production, use orchestrator.yaml + Postgres instead.
+orchestrator:
+  interval_seconds: 300
+  stop_on_failure: false
+  steps:
+    - name: ingest_pdfs            # AGENT 1: PDF -> chunks (JSONL)
+      cwd: "../arkguru-pdf-extraction"
+      command: "python -m phase1_pdf.worker --once"
+
+    - name: crawl_web              # AGENT 2: web scraping (independent of PDFs)
+      cwd: "../arkguru-web-scraping"
+      command: "python -m phase2_web.worker --once"
+      enabled: false
+
+    - name: answer_demo            # AGENT 3: retrieve + GENERATE answer (Ollama if up, else extractive)
+      cwd: "."
+      command: "python -m phase3_rag.serve --ask 'What does error code E14 mean?' --processed-dir ../arkguru-pdf-extraction/data/processed"
+      depends_on: [ingest_pdfs]

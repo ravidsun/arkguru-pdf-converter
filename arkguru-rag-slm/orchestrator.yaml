@@ -1,0 +1,37 @@
+# =============================================================================
+# Autonomous orchestrator — dependency-ordered pipeline of phase workers.
+# Each step runs a phase's `--once` worker as a subprocess. Steps run in
+# topological order; a step is skipped if a dependency failed. No LLM involved.
+#
+# Assumes the three repos are checked out side by side:
+#   some-dir/
+#     arkguru-pdf-extraction/   arkguru-web-scraping/   arkguru-rag-slm/  (here)
+# Adjust `cwd` paths if your layout differs.
+# =============================================================================
+orchestrator:
+  interval_seconds: 300        # loop cadence when not using --once
+  stop_on_failure: false       # true => abort the pass on first failure
+
+  steps:
+    - name: ingest_pdfs
+      cwd: "../arkguru-pdf-extraction"
+      # Session/direct Postgres when PG_DSN is set; otherwise JSONL file sink.
+      command: >-
+        sh -c 'if [ -n "$PG_DSN" ]; then
+          python -m phase1_pdf.worker --once --sink postgres;
+        else
+          python -m phase1_pdf.worker --once;
+        fi'
+
+    - name: crawl_web
+      cwd: "../arkguru-web-scraping"
+      command: "python -m phase2_web.worker --once"
+      enabled: false           # enable once you've set phase2.seeds
+
+    - name: index_embeddings
+      cwd: "."
+      # hashing is Cloud-safe (no sentence-transformers). NUC daemons can
+      # override: python -m phase3_rag.worker --embedder sentence_transformer
+      command: "python -m phase3_rag.worker --once --embedder hashing"
+      # Web crawl is disabled, so depend only on PDF ingest (not crawl_web).
+      depends_on: [ingest_pdfs]
