@@ -6,12 +6,7 @@ The companion document is [LOCAL_RUN.md](LOCAL_RUN.md).
 
 ## How the environment is defined
 
-The personal Cloud Agent environment for this workspace is **dashboard-managed**. Its repos are:
-
-- `arkguru-common`
-- `arkguru-pdf-converter` (this repo; `install` script + vendored common and Phase 2)
-- `arkguru-pdf-extraction`
-- `arkguru-rag-slm`
+The personal Cloud Agent environment for this workspace is **dashboard-managed**. The only repo is **`arkguru-pdf-converter`**. Common, Phase 1, Phase 2, and Phase 3 are folders inside it.
 
 `install` is empty until the environment is Saved with a working script. After Save, new agents run that `install` on boot (or from an environment build snapshot). There is no `start` command and no `terminals` entry: the pipeline is CLI-driven. Long-running workers (`make worker`, `orchestrator.py`) are started on demand.
 
@@ -20,21 +15,13 @@ This repo also commits [`.cursor/environment.json`](../.cursor/environment.json)
 ```json
 {
   "name": "arkguru RAG dev",
-  "install": "bash scripts/setup_dev_env.sh",
-  "repositoryDependencies": [
-    "https://github.com/ravidsun/arkguru-common",
-    "https://github.com/ravidsun/arkguru-pdf-extraction",
-    "https://github.com/ravidsun/arkguru-rag-slm"
-  ]
+  "install": "bash scripts/setup_dev_env.sh"
 }
 ```
 
 | Field | Role |
 |---|---|
-| `install` | After checkout, creates `.venv`, installs `arkguru-common`, and installs phase dependencies. Idempotent. Does **not** start servers. |
-| `repositoryDependencies` | Puts `arkguru-common` and the Phase 1 / Phase 3 repos in the Cloud Agent GitHub token scope so they can be checked out as siblings. |
-
-Phase 2 (`arkguru-web-scraping`) lives **in this umbrella** for now (`./arkguru-web-scraping`). `install` uses that tree. The public GitHub repo is not the source of truth.
+| `install` | After checkout, creates `.venv`, installs `./arkguru-common`, and installs nested phase dependencies. Idempotent. Does **not** start servers. |
 
 Changes to the dashboard environment or to `.cursor/environment.json` apply to **newly started** agents, not an already-running session.
 
@@ -43,15 +30,14 @@ Changes to the dashboard environment or to `.cursor/environment.json` apply to *
 Typical layout after checkout + `install`:
 
 ```
-/agent/repos/
-  arkguru-common/            # first-class shared package (preferred)
-  arkguru-pdf-converter/     # this repo; .venv lives here
-    arkguru-common/          # vendored fallback if the sibling is missing
+/agent/repos/arkguru-pdf-converter/   # this repo; .venv lives here
+  arkguru-common/
   arkguru-pdf-extraction/
+  arkguru-web-scraping/
   arkguru-rag-slm/
 ```
 
-`scripts/setup_dev_env.sh` looks for each repo as a sibling (`../arkguru-common`) or nested under this repo. It prefers the sibling `arkguru-common` checkout.
+`scripts/setup_dev_env.sh` looks for each phase only under this repo (`./arkguru-common`, `./arkguru-pdf-extraction`, …).
 
 Debian/Ubuntu images need `python3-venv` (and `python3-pip` if missing). The install script installs those packages when `ensurepip` is unavailable.
 
@@ -72,7 +58,7 @@ The agent runs on a **remote Linux VM**. It cannot read folders on your PC
 **Ingest directory on the VM:**
 
 ```
-/agent/repos/arkguru-pdf-extraction/data/raw_pdfs/
+/agent/repos/arkguru-pdf-converter/arkguru-pdf-extraction/data/raw_pdfs/
 ```
 
 Subfolders are searched recursively (`hvac/manual.pdf` → source id `hvac/manual.pdf`).
@@ -87,7 +73,7 @@ Compress-Archive -Path "C:\Users\ravid\Downloads\AstrologyBooks-20260908T054904Z
 ```
 
 In the agent chat: attach `VedicAstro_potdar.zip` and ask it to unpack into
-`/agent/repos/arkguru-pdf-extraction/data/raw_pdfs/VedicAstro_potdar` and run Phase 1.
+`/agent/repos/arkguru-pdf-converter/arkguru-pdf-extraction/data/raw_pdfs/VedicAstro_potdar` and run Phase 1.
 
 Attaching individual PDFs works for a handful of files; a zip is better for a bookshelf.
 
@@ -95,14 +81,14 @@ Attaching individual PDFs works for a handful of files; a zip is better for a bo
 
 ```bash
 source /agent/repos/arkguru-pdf-converter/.venv/bin/activate
-cd /agent/repos/arkguru-pdf-extraction
+cd /agent/repos/arkguru-pdf-converter/arkguru-pdf-extraction
 python -m phase1_pdf.pipeline --input data/raw_pdfs --sink postgres --workers 1
 ```
 
 Phase 1 fills `chunks` only. Then:
 
 ```bash
-cd /agent/repos/arkguru-rag-slm
+cd /agent/repos/arkguru-pdf-converter/arkguru-rag-slm
 python -m phase3_rag.embed_datastore --embedder hashing --dim 1024
 ```
 
@@ -115,7 +101,7 @@ The Cloud `install` script matches the **offline** local bootstrap:
 
 - `arkguru-common` (schema, tokenizer, chunking, datastore/`search_chunks`, worker, Python RRF for file mode) + pytest + **postgres extra** (`psycopg`, `pgvector`)
 - Phase 1: pymupdf / pymupdf4llm, tiktoken, reportlab (sample PDF), `psycopg` / `pgvector` for `--sink postgres`, **OCR** (`ocrmypdf`, `pytesseract`, `pillow`, plus system `tesseract-ocr` / `ghostscript` when `apt-get` is available)
-- Phase 2 (only if that repo is checked out): httpx, trafilatura, datasketch, …
+- Phase 2: httpx, trafilatura, datasketch, …
 - Phase 3 core only: numpy + rank-bm25
 
 **Not** installed by default (keep the image lean; no multi-GB model downloads):
@@ -131,7 +117,7 @@ To add the full Phase 3 stack in a Cloud session:
 
 ```bash
 source .venv/bin/activate
-pip install -r ../arkguru-rag-slm/requirements.txt
+pip install -r arkguru-rag-slm/requirements.txt
 ```
 
 That is slow and network-heavy; only do it when you need real embeddings or generation.
@@ -142,17 +128,17 @@ That is slow and network-heavy; only do it when you need real embeddings or gene
 
 ```bash
 source /agent/repos/arkguru-pdf-converter/.venv/bin/activate
+cd /agent/repos/arkguru-pdf-converter
 
-# Shared package (sibling checkout)
-python -m pytest /agent/repos/arkguru-common/tests -q
+python -m pytest arkguru-common/tests -q
 
 # Phase 1
-cd /agent/repos/arkguru-pdf-extraction
+cd arkguru-pdf-extraction
 python scripts/make_sample_pdf.py
 make phase1
 
 # Phase 3 end-to-end (offline orchestrator)
-cd /agent/repos/arkguru-rag-slm
+cd ../arkguru-rag-slm
 make e2e
 ```
 
@@ -161,7 +147,7 @@ make e2e
 One-shot RAG without the orchestrator:
 
 ```bash
-cd /agent/repos/arkguru-rag-slm
+cd /agent/repos/arkguru-pdf-converter/arkguru-rag-slm
 python -m phase3_rag.run_pdfs \
   --pdfs ../arkguru-pdf-extraction/data/raw_pdfs \
   --embedder hashing \
@@ -176,12 +162,12 @@ Use a **Session pooler** DSN (`aws-<region>.pooler.supabase.com:5432`, user `pos
 
 ```bash
 source /agent/repos/arkguru-pdf-converter/.venv/bin/activate
-cd /agent/repos/arkguru-pdf-extraction
+cd /agent/repos/arkguru-pdf-converter/arkguru-pdf-extraction
 python scripts/make_sample_pdf.py
 python -m phase1_pdf.pipeline --config config/config.yaml --init-db
 python -m phase1_pdf.pipeline --input data/raw_pdfs --sink postgres --workers 1 --no-figures
 
-cd /agent/repos/arkguru-rag-slm
+cd ../arkguru-rag-slm
 python -m phase3_rag.embed_datastore --embedder hashing --dim 1024
 # or: python -m phase3_rag.run_pdfs --pdfs ../arkguru-pdf-extraction/data/raw_pdfs \
 #        --sink postgres --embedder hashing
@@ -194,14 +180,14 @@ SELECT chunk_id, chunk_index, source_id, page FROM chunks ORDER BY source_id, ch
 SELECT count(*) FROM chunk_embeddings;
 ```
 
-Phase 2 is skipped unless `arkguru-web-scraping` is checked out. When it is, a local HTTP fixture avoids public crawls. Postgres sink uses schema `web` (never `public.chunks`):
+Phase 2 uses the nested `arkguru-web-scraping` folder. A local HTTP fixture avoids public crawls. Postgres sink uses schema `web` (never `public.chunks`):
 
 ```bash
 mkdir -p /tmp/arkguru-demo-site
 printf '<!DOCTYPE html><html><head><title>Demo</title></head><body><h1>Safety</h1><p>PPE includes insulated gloves rated to 1000V and safety eyewear. Lockout-tagout is mandatory before servicing any unit.</p></body></html>' \
   > /tmp/arkguru-demo-site/index.html
 python3 -m http.server 8899 --directory /tmp/arkguru-demo-site &
-cd /tmp/arkguru-repos/arkguru-web-scraping
+cd /agent/repos/arkguru-pdf-converter/arkguru-web-scraping
 python -m phase2_web.pipeline --seeds http://127.0.0.1:8899/index.html --max-pages 5 --no-pdfs
 ```
 
@@ -237,5 +223,5 @@ Do not combine a Dockerfile, an explicit image, and a snapshot in the same confi
 - [`.cursor/environment.json`](../.cursor/environment.json)
 - [`DATABASE_SETUP.md`](DATABASE_SETUP.md) — native, Docker, hosted `PG_DSN`
 - [`scripts/setup_dev_env.sh`](../scripts/setup_dev_env.sh)
-- [`../arkguru-common/scripts/start_services.sh`](https://github.com/ravidsun/arkguru-common/blob/develop/scripts/start_services.sh) — Cloud `start`; publishes `PG_DSN` into gitignored `.env` files
-- [`../arkguru-common/README.md`](https://github.com/ravidsun/arkguru-common) (sibling) or the vendored [arkguru-common/README.md](../arkguru-common/README.md)
+- [`arkguru-common/scripts/start_services.sh`](../arkguru-common/scripts/start_services.sh) — optional Cloud `start`; publishes `PG_DSN` into gitignored `.env` files (script may not exist in older trees)
+- [`arkguru-common/README.md`](../arkguru-common/README.md)

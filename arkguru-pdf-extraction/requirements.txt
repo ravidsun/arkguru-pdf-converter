@@ -1,0 +1,18 @@
+# Shared schema / datastore / chunking (sibling package)
+-e ../arkguru-common
+# Phase 1 - PDF extraction (runs local, CPU-only, no GPU)
+pymupdf4llm>=0.0.17      # fast native-text PDF -> markdown (default backend)
+pymupdf>=1.24            # raw text fallback + scanned-page detection
+tiktoken>=0.7            # proxy tokenizer for chunk sizing
+pyyaml>=6.0             # config
+langdetect>=1.0.9        # per-doc language tag (optional)
+pyarrow>=16.0            # parquet output (optional; jsonl needs nothing)
+# --- optional, heavier backends / OCR ---
+# docling>=2.0           # best-in-class tables & layout (slower, larger deps)
+ocrmypdf>=16.0           # scanned-PDF OCR (needs system tesseract + ghostscript)
+pytesseract>=0.3.10      # OCR for embedded diagrams/charts/graphs (needs system tesseract)
+pillow>=10.0             # image decoding for pytesseract
+# reportlab>=4.0         # only for scripts/make_sample_pdf.py
+# --- optional: Postgres + pgvector datastore sink (sink: postgres) ---
+# psycopg[binary]>=3.2
+# pgvector>=0.3

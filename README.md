@@ -100,7 +100,7 @@ brew install tesseract ghostscript
 
 **Key features:**
 - **Schema `web`:** `--sink postgres` writes `web.chunks` / `web.search_chunks` on the same `PG_DSN` as the books. It **refuses** `public`.
-- **Allowlisted BFS:** four free learning sites in `config/config.yaml`; `same_domain_only`, robots.txt, path denylist, Kundli-generator query skip
+- **Allowlisted BFS:** astrology article hubs in `config/config.yaml` (Vedic + traditional Western; no commercial Kundli portals); `same_domain_only`, robots.txt, path denylist, Kundli-generator query skip
 - **Two fetch backends:** local (trafilatura + httpx, free), firecrawl (JS-heavy sites, paid)
 - **Structure-aware chunking:** Same `pack_windows` logic as Phase 1
 - **Near-dedup:** MinHash LSH collapses syndicated/similar pages (Jaccard ≥ 0.9)
@@ -429,18 +429,19 @@ Serve via Ollama (local LLM)
 
 ## Contributing
 
-Each phase is a self-contained repo:
-- [`arkguru-pdf-extraction`](https://github.com/ravidsun/arkguru-pdf-extraction) — PDF → Chunks
-- [`arkguru-web-scraping`](https://github.com/ravidsun/arkguru-web-scraping) — URLs → Chunks
-- [`arkguru-rag-slm`](https://github.com/ravidsun/arkguru-rag-slm) — Chunks → Fine-tune + RAG
+This repository is the source of truth. Each phase is a folder here:
+- [`arkguru-pdf-extraction`](arkguru-pdf-extraction) — PDF → Chunks
+- [`arkguru-web-scraping`](arkguru-web-scraping) — URLs → Chunks
+- [`arkguru-rag-slm`](arkguru-rag-slm) — Chunks → Fine-tune + RAG
+- [`arkguru-common`](arkguru-common) — shared schema, datastore, chunking
 
-Contributions welcome. See individual repos for issue tracking and pull requests.
+Contributions welcome. Open issues and pull requests against this repo.
 
 ---
 
 ## License
 
-MIT (each repo independently licensed)
+MIT
 
 ---
 

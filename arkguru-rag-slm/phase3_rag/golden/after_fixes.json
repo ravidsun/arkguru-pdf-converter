@@ -1,0 +1,161 @@
+{
+  "overall": {
+    "n": 173,
+    "recall@5": 0.448,
+    "recall@10": 0.5116,
+    "recall@20": 0.5896,
+    "recall@50": 0.6445,
+    "mrr@10": 0.3325,
+    "ndcg@10": 0.3587,
+    "mean_candidates": 116.5,
+    "dense_leg_hits": 47,
+    "lexical_leg_hits": 138,
+    "found_any": 142
+  },
+  "by_stratum": {
+    "conflict": {
+      "n": 23,
+      "recall@5": 0.1739,
+      "recall@10": 0.1957,
+      "recall@20": 0.2826,
+      "recall@50": 0.3261,
+      "mrr@10": 0.2345,
+      "ndcg@10": 0.1666,
+      "mean_candidates": 118.5,
+      "dense_leg_hits": 5,
+      "lexical_leg_hits": 20,
+      "found_any": 19
+    },
+    "lookup": {
+      "n": 25,
+      "recall@5": 0.4,
+      "recall@10": 0.52,
+      "recall@20": 0.64,
+      "recall@50": 0.68,
+      "mrr@10": 0.2247,
+      "ndcg@10": 0.2943,
+      "mean_candidates": 117.4,
+      "dense_leg_hits": 6,
+      "lexical_leg_hits": 19,
+      "found_any": 20
+    },
+    "negation": {
+      "n": 25,
+      "recall@5": 0.8,
+      "recall@10": 0.8,
+      "recall@20": 0.84,
+      "recall@50": 0.84,
+      "mrr@10": 0.6227,
+      "ndcg@10": 0.6667,
+      "mean_candidates": 114.5,
+      "dense_leg_hits": 11,
+      "lexical_leg_hits": 23,
+      "found_any": 23
+    },
+    "numeric": {
+      "n": 25,
+      "recall@5": 0.4,
+      "recall@10": 0.56,
+      "recall@20": 0.6,
+      "recall@50": 0.68,
+      "mrr@10": 0.2443,
+      "ndcg@10": 0.3171,
+      "mean_candidates": 114.4,
+      "dense_leg_hits": 2,
+      "lexical_leg_hits": 18,
+      "found_any": 18
+    },
+    "procedural": {
+      "n": 25,
+      "recall@5": 0.68,
+      "recall@10": 0.76,
+      "recall@20": 0.92,
+      "recall@50": 0.96,
+      "mrr@10": 0.449,
+      "ndcg@10": 0.5245,
+      "mean_candidates": 115.0,
+      "dense_leg_hits": 7,
+      "lexical_leg_hits": 24,
+      "found_any": 24
+    },
+    "synthesis": {
+      "n": 25,
+      "recall@5": 0.14,
+      "recall@10": 0.16,
+      "recall@20": 0.22,
+      "recall@50": 0.32,
+      "mrr@10": 0.239,
+      "ndcg@10": 0.1585,
+      "mean_candidates": 117.8,
+      "dense_leg_hits": 11,
+      "lexical_leg_hits": 16,
+      "found_any": 20
+    },
+    "transliteration": {
+      "n": 25,
+      "recall@5": 0.52,
+      "recall@10": 0.56,
+      "recall@20": 0.6,
+      "recall@50": 0.68,
+      "mrr@10": 0.3053,
+      "ndcg@10": 0.3677,
+      "mean_candidates": 118.3,
+      "dense_leg_hits": 5,
+      "lexical_leg_hits": 18,
+      "found_any": 18
+    }
+  },
+  "by_block_type": {
+    "table": {
+      "n": 25,
+      "recall@5": 0.4,
+      "recall@10": 0.56,
+      "recall@20": 0.6,
+      "recall@50": 0.68,
+      "mrr@10": 0.2443,
+      "ndcg@10": 0.3171,
+      "mean_candidates": 114.4,
+      "dense_leg_hits": 2,
+      "lexical_leg_hits": 18,
+      "found_any": 18
+    },
+    "text": {
+      "n": 148,
+      "recall@5": 0.4561,
+      "recall@10": 0.5034,
+      "recall@20": 0.5878,
+      "recall@50": 0.6385,
+      "mrr@10": 0.3474,
+      "ndcg@10": 0.3657,
+      "mean_candidates": 116.9,
+      "dense_leg_hits": 45,
+      "lexical_leg_hits": 120,
+      "found_any": 124
+    }
+  },
+  "by_source_type": {
+    "pdf": {
+      "n": 173,
+      "recall@5": 0.448,
+      "recall@10": 0.5116,
+      "recall@20": 0.5896,
+      "recall@50": 0.6445,
+      "mrr@10": 0.3325,
+      "ndcg@10": 0.3587,
+      "mean_candidates": 116.5,
+      "dense_leg_hits": 47,
+      "lexical_leg_hits": 138,
+      "found_any": 142
+    }
+  },
+  "_meta": {
+    "label": "after-fixes",
+    "embedder": "hashing",
+    "k_dense": 60,
+    "k_lexical": 60,
+    "k_candidates": 120,
+    "rewriter": "noop",
+    "golden": "phase3_rag/golden/golden_qa.jsonl",
+    "rows": 173
+  }
+}

@@ -9,18 +9,15 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PARENT_DIR="$(dirname "$REPO_ROOT")"
 
 log() { printf '[detect_local_pg] %s\n' "$*"; }
 
 find_common() {
-  local candidate
-  for candidate in "$PARENT_DIR/arkguru-common" "$REPO_ROOT/arkguru-common"; do
-    if [ -f "$candidate/common/local_pg.py" ]; then
-      echo "$candidate"
-      return 0
-    fi
-  done
+  local candidate="$REPO_ROOT/arkguru-common"
+  if [ -f "$candidate/common/local_pg.py" ]; then
+    echo "$candidate"
+    return 0
+  fi
   return 1
 }
 
@@ -47,7 +44,7 @@ write_local_env() {
 }
 
 if ! COMMON_DIR="$(find_common)"; then
-  echo "[detect_local_pg] could not find arkguru-common (sibling or ./arkguru-common)." >&2
+  echo "[detect_local_pg] could not find $REPO_ROOT/arkguru-common." >&2
   exit 1
 fi
 if ! PY="$(find_python)"; then
@@ -77,7 +74,7 @@ fi
 
 PUBLISH="${COMMON_DIR}/scripts/publish_pg_dsn.sh"
 if [ -x "$PUBLISH" ] || [ -f "$PUBLISH" ]; then
-  REPOS_PARENT="${REPOS_PARENT:-$PARENT_DIR}"
+  REPOS_PARENT="${REPOS_PARENT:-$REPO_ROOT}"
   export PG_DSN DSN_ORIGIN REPOS_PARENT
   bash "$PUBLISH"
 else

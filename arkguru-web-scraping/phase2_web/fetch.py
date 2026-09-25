@@ -269,16 +269,20 @@ def crawl(
                         out.pdf_urls.append(url)
                         per_seed += 1
                     continue
-                if delay_seconds > 0 and (out.pages or out.pdf_urls):
+                if delay_seconds > 0 and (out.pages or out.pdf_urls or per_seed > 0):
                     time.sleep(delay_seconds)
                 try:
                     page = fetch_url(client, url, timeout=timeout)
                 except Exception as e:
                     log.warning("fetch failed %s: %s", url, e)
                     out.skipped += 1
+                    per_seed += 1
                     continue
+                # 404/5xx still consume the per-seed budget so broken sitemaps
+                # cannot drain thousands of links after a handful of real pages.
                 if page.status >= 400:
                     out.skipped += 1
+                    per_seed += 1
                     continue
                 if page.is_pdf:
                     if page.url not in out.pdf_urls:
@@ -287,6 +291,7 @@ def crawl(
                     continue
                 if not page.html:
                     out.skipped += 1
+                    per_seed += 1
                     continue
                 out.pages.append(page)
                 per_seed += 1
