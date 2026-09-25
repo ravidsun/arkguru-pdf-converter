@@ -10,3 +10,11 @@ artifacts/
 *.gguf
 *.parquet
 .env
+
+# Local wizard (arkguru-ui)
+arkguru-ui/frontend/node_modules/
+arkguru-ui/frontend/dist/
+arkguru-ui/data/uploads/
+arkguru-ui/data/jobs/
+arkguru-ui/data/processed/
+arkguru-ui/data/store/
