@@ -12,7 +12,6 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PARENT_DIR="$(dirname "$REPO_ROOT")"
 COMPOSE_FILE="${REPO_ROOT}/compose.yaml"
 HOST="127.0.0.1"
 PORT="${ARKGURU_PG_PORT:-5433}"
@@ -27,13 +26,11 @@ log() { printf '[setup_docker_pg] %s\n' "$*"; }
 die() { printf '[setup_docker_pg] %s\n' "$*" >&2; exit 1; }
 
 find_common() {
-  local candidate
-  for candidate in "$PARENT_DIR/arkguru-common" "$REPO_ROOT/arkguru-common"; do
-    if [ -f "$candidate/scripts/publish_pg_dsn.sh" ] || [ -d "$candidate/common" ]; then
-      echo "$candidate"
-      return 0
-    fi
-  done
+  local candidate="$REPO_ROOT/arkguru-common"
+  if [ -f "$candidate/scripts/publish_pg_dsn.sh" ] || [ -d "$candidate/common" ]; then
+    echo "$candidate"
+    return 0
+  fi
   return 1
 }
 
@@ -113,7 +110,7 @@ COMMON_DIR=""
 if COMMON_DIR="$(find_common)"; then
   PUBLISH="${COMMON_DIR}/scripts/publish_pg_dsn.sh"
   if [ -f "$PUBLISH" ]; then
-    REPOS_PARENT="${REPOS_PARENT:-$PARENT_DIR}"
+    REPOS_PARENT="${REPOS_PARENT:-$REPO_ROOT}"
     export PG_DSN DSN_ORIGIN REPOS_PARENT
     bash "$PUBLISH"
   else

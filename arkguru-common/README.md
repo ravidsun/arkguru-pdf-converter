@@ -3,11 +3,11 @@
 Shared, framework-free primitives used by all three phases of the **arkguru**
 local RAG system:
 
-- [`arkguru-pdf-extraction`](https://github.com/ravidsun/arkguru-pdf-extraction) (Phase 1)
-- [`arkguru-web-scraping`](https://github.com/ravidsun/arkguru-web-scraping) (Phase 2)
-- [`arkguru-rag-slm`](https://github.com/ravidsun/arkguru-rag-slm) (Phase 3)
+- [`arkguru-pdf-extraction`](../arkguru-pdf-extraction) (Phase 1)
+- [`arkguru-web-scraping`](../arkguru-web-scraping) (Phase 2)
+- [`arkguru-rag-slm`](../arkguru-rag-slm) (Phase 3)
 
-Each phase repo installs this package as an editable sibling dependency
+Each phase folder installs this package as an editable dependency
 (`pip install -e ../arkguru-common`), so the `common` package is importable as a
 top-level module.
 

@@ -429,18 +429,19 @@ Serve via Ollama (local LLM)
 
 ## Contributing
 
-Each phase is a self-contained repo:
-- [`arkguru-pdf-extraction`](https://github.com/ravidsun/arkguru-pdf-extraction) — PDF → Chunks
-- [`arkguru-web-scraping`](https://github.com/ravidsun/arkguru-web-scraping) — URLs → Chunks
-- [`arkguru-rag-slm`](https://github.com/ravidsun/arkguru-rag-slm) — Chunks → Fine-tune + RAG
+This repository is the source of truth. Each phase is a folder here:
+- [`arkguru-pdf-extraction`](arkguru-pdf-extraction) — PDF → Chunks
+- [`arkguru-web-scraping`](arkguru-web-scraping) — URLs → Chunks
+- [`arkguru-rag-slm`](arkguru-rag-slm) — Chunks → Fine-tune + RAG
+- [`arkguru-common`](arkguru-common) — shared schema, datastore, chunking
 
-Contributions welcome. See individual repos for issue tracking and pull requests.
+Contributions welcome. Open issues and pull requests against this repo.
 
 ---
 
 ## License
 
-MIT (each repo independently licensed)
+MIT
 
 ---
 
