@@ -435,6 +435,13 @@ This repository is the source of truth. Each phase is a folder here:
 - [`arkguru-rag-slm`](arkguru-rag-slm) — Chunks → Fine-tune + RAG
 - [`arkguru-common`](arkguru-common) — shared schema, datastore, chunking
 
+Standalone GitHub copies under `ravidsun` (`arkguru-web-scraping`, `arkguru-pdf-extraction`, `arkguru-rag-slm`, `arkguru-common`) are historical. Do not open pull requests there. Archive each from Settings if it still appears on the profile:
+
+- https://github.com/ravidsun/arkguru-web-scraping/settings
+- https://github.com/ravidsun/arkguru-pdf-extraction/settings
+- https://github.com/ravidsun/arkguru-rag-slm/settings
+- https://github.com/ravidsun/arkguru-common/settings
+
 Contributions welcome. Open issues and pull requests against this repo.
 
 ---
