@@ -2,8 +2,9 @@
 
 The pipeline stores data in **two Postgres tables** (`chunks` = text + metadata,
 `chunk_embeddings` = vectors) using the **pgvector** extension. You do **not**
-write DDL by hand — `ensure_schema()` in `common/datastore.py` creates the
-tables and indexes. Provide:
+write DDL by hand — numbered files in [`migrations/`](../migrations/) plus
+`python -m common.migrate` / `ensure_schema()` create the tables, indexes, and
+`search_chunks()` v2. Provide:
 
 1. PostgreSQL 14+ (16 recommended) with pgvector 0.5+,
 2. a database + login role,
@@ -58,11 +59,24 @@ server is already running and you only need `.env` written.
 
 ## Hybrid retrieve
 
-When `PG_DSN` is set, Phase 3 retrieve is one SQL function, `search_chunks()`,
-created by `ensure_schema()` in `common/datastore.py` (not a hand-written SQL
-file). It fuses HNSW cosine on `chunk_embeddings` with GIN `ts` on `chunks`
-using reciprocal rank fusion (`is_parent = false` on both legs). Python still
-embeds the query, reranks, and expands parents. File/npz mode keeps Python RRF.
+When `PG_DSN` is set, Phase 3 retrieve is one SQL function, `search_chunks()`
+v2, installed by `migrations/0002_search_chunks_v2.sql`. It fuses HNSW cosine
+on `chunk_embeddings` with a `websearch_to_tsquery` leg and a
+`phraseto_tsquery` leg (multi-word terms from `golden/domain_lexicon.json`)
+using reciprocal rank fusion. Parents and quality-gate failures are excluded.
+Python still embeds the query, reranks, and expands parents. File/npz mode
+keeps Python RRF.
+
+Preview / apply (Windows PowerShell), always against a **new** schema first:
+
+```powershell
+$env:PG_DSN = "postgresql://rag:change-me@127.0.0.1:5432/rag"
+python -m common.migrate --schema v2 --dry-run
+python -m common.migrate --schema v2 --apply
+python -m common.validate_schema --schema v2
+```
+
+`--apply` refuses `public` unless you also pass `--allow-public`.
 
 ---
 
@@ -381,9 +395,10 @@ python -m phase1_pdf.pipeline --init-db
 
 ## Operating notes
 
-- **Tables are auto-managed.** `ensure_schema()` is idempotent on every write path
-  and installs `search_chunks()` (hybrid retrieve). Do not put that function in a
-  hand-written schema file.
+- **Tables are migration-managed.** `ensure_schema()` applies `migrations/`
+  (idempotent) and installs `search_chunks()` v2. Dry-run with
+  `python -m common.migrate --schema v2 --dry-run` before `--apply`. `public`
+  is refused unless `--allow-public` / `allow_public_schema: true`.
 - **Re-embed with a new model:** `TRUNCATE chunk_embeddings;` then re-run
   `phase3_rag.embed_datastore`. If `dim` changes, update `config/datastore.yaml`
   and drop/recreate `chunk_embeddings` (vector width is fixed at create).
