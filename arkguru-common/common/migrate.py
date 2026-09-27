@@ -436,7 +436,10 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
         print(dry_run_sql(args.schema, dim=dim, directory=directory), end="")
         return 0
 
-    assert_schema_writable(args.schema, allow_public=args.allow_public)
+    try:
+        assert_schema_writable(args.schema, allow_public=args.allow_public)
+    except PublicSchemaForbidden as exc:
+        raise SystemExit(str(exc)) from exc
     try:
         store, dim = _store_from_args(args)
     except ValueError as exc:

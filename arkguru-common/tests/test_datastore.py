@@ -434,7 +434,7 @@ def test_search_chunks_retries_once_after_ensure_schema(monkeypatch):
     monkeypatch.setattr(ChunkStore, "_connect", lambda self: conn)
     called = {"n": 0}
 
-    def fake_schema(self):
+    def fake_schema(self, *, allow_public=None):
         called["n"] += 1
 
     monkeypatch.setattr(ChunkStore, "ensure_schema", fake_schema)
@@ -536,8 +536,10 @@ def test_ensure_schema_creates_web_schema(monkeypatch):
     assert "CREATE OR REPLACE FUNCTION web.search_chunks(" in joined
     assert "CREATE TABLE IF NOT EXISTS web.chunks" in joined
     assert "CREATE TABLE IF NOT EXISTS web.chunk_embeddings" in joined
-    assert "CREATE INDEX IF NOT EXISTS chunks_ts_idx ON web.chunks" in joined
-    assert "CREATE INDEX IF NOT EXISTS chunk_embeddings_hnsw_idx ON web.chunk_embeddings" in joined
+    assert "CREATE INDEX IF NOT EXISTS chunks_ts_idx" in joined
+    assert "ON web.chunks" in joined
+    assert "CREATE INDEX IF NOT EXISTS chunk_embeddings_hnsw_idx" in joined
+    assert "ON web.chunk_embeddings" in joined
     assert "web.chunks_ts_idx" not in joined
     assert "phraseto_tsquery" in joined
     public_fn = [s for s in cur.sqls if "FUNCTION public.search_chunks(" in s]

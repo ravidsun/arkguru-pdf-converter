@@ -14,7 +14,11 @@ def test_all_checks_are_selects():
     assert len(CHECKS) >= 16
     for name, sql, expect in render_checks("v2"):
         _assert_readonly(sql)
-        assert "v2.chunks" in sql or "nspname = 'v2'" in sql or name == "search_chunks_function"
+        assert (
+            "v2.chunks" in sql
+            or "v2.chunk_embeddings" in sql
+            or "nspname = 'v2'" in sql
+        )
         assert "{{" not in sql
         assert expect[0] in {"eq", "ge"}
 
