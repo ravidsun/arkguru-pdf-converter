@@ -106,7 +106,6 @@ def test_embed_datastore_refuses_hashing(monkeypatch):
     )
     with pytest.raises(SystemExit, match="allow-hashing"):
         embed_main(["--embedder", "hashing"])
-    assert HASHING_DATASTORE_ERROR
 
 
 def test_embed_datastore_writes_label_and_skips_invalid(monkeypatch):
