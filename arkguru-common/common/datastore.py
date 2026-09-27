@@ -32,7 +32,8 @@ from typing import Iterable, Iterator, Optional
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import logging
-from .schema import Chunk
+from .lang import DEFAULT_LANG
+from .schema import Chunk, content_hash as hash_content
 
 log = logging.getLogger("common.datastore")
 
@@ -44,7 +45,8 @@ _PUBLIC_SCHEMAS = frozenset({"", "public"})
 # columns of the chunks (source-of-truth) table
 _COLS = ["chunk_id", "text", "source_type", "source_id", "chunk_index",
          "title", "section", "page", "url", "domain", "lang",
-         "parent_id", "is_parent", "token_count", "overlap_tokens"]
+         "parent_id", "is_parent", "token_count", "overlap_tokens",
+         "content_hash"]
 
 _COL_DDL = {
     "chunk_id": "text",
@@ -62,6 +64,7 @@ _COL_DDL = {
     "is_parent": "boolean",
     "token_count": "int",
     "overlap_tokens": "int",
+    "content_hash": "text",
 }
 
 # columns returned to retrieval callers. New fields are appended so existing
@@ -321,11 +324,20 @@ $search$;
 """
 
 
+_QUALITY_EMBED_OK = (
+    "(c.meta->'quality'->>'embed' IS NULL "
+    "OR c.meta->'quality'->>'embed' IN ('true', '1'))"
+    " AND (c.meta->'quality'->>'passed' IS NULL "
+    "OR c.meta->'quality'->>'passed' IN ('true', '1'))"
+)
+
+
 def _migrate_chunk_columns(cur, table: str) -> None:
-    """Add any missing ``chunks`` columns and make ``chunk_index`` NOT NULL.
+    """Add any missing ``chunks`` columns and tighten ``chunk_index`` / ``lang``.
 
     ``CREATE TABLE IF NOT EXISTS`` will not add columns to an older table, so
-    an ingest can otherwise skip ``chunk_index``. Idempotent.
+    an ingest can otherwise skip ``chunk_index``. Idempotent. Formal numbered
+    migrations land in Phase 1 step 11; this is the backward-compatible path.
     """
     for name, typ in _COL_DDL.items():
         cur.execute(
@@ -336,6 +348,19 @@ def _migrate_chunk_columns(cur, table: str) -> None:
         f"ALTER TABLE {table} ALTER COLUMN chunk_index SET DEFAULT 0")
     cur.execute(
         f"ALTER TABLE {table} ALTER COLUMN chunk_index SET NOT NULL")
+    cur.execute(
+        f"UPDATE {table} SET lang = '{DEFAULT_LANG}' "
+        f"WHERE lang IS NULL OR btrim(lang) = ''")
+    cur.execute(
+        f"ALTER TABLE {table} ALTER COLUMN lang SET DEFAULT '{DEFAULT_LANG}'")
+    cur.execute(
+        f"ALTER TABLE {table} ALTER COLUMN lang SET NOT NULL")
+    cur.execute(
+        f"CREATE UNIQUE INDEX IF NOT EXISTS "
+        f"{index_ident(table, '_content_hash_child_uidx')} "
+        f"ON {table} (content_hash) "
+        f"WHERE is_parent IS NOT TRUE "
+        f"AND content_hash IS NOT NULL AND btrim(content_hash) <> ''")
 
 
 def _coerce_ef_search(value) -> Optional[int]:
@@ -432,11 +457,12 @@ class ChunkStore:
                     page         int,
                     url          text,
                     domain       text,
-                    lang         text,
+                    lang         text NOT NULL DEFAULT 'und',
                     parent_id    text,
                     is_parent    boolean DEFAULT false,
                     token_count  int,
                     overlap_tokens int DEFAULT 0,
+                    content_hash text,
                     meta         jsonb DEFAULT '{{}}'::jsonb,
                     ts           tsvector GENERATED ALWAYS AS
                                  (to_tsvector('english', coalesce(text,''))) STORED,
@@ -467,9 +493,8 @@ class ChunkStore:
                          "already present" if pre.get(t) else "created")
 
     # -- write chunks (Phases 1/2) ----------------------------------------
-    def upsert(self, chunks: Iterable[Chunk]) -> int:
-        """Insert/update chunk rows (source of truth). Idempotent by chunk_id.
-        Does NOT touch the vectors table."""
+    def _prepare_upsert_rows(self, chunks: Iterable[Chunk]
+                             ) -> tuple[list[tuple], list[int], int]:
         rows = []
         indexes: list[int] = []
         nulls = 0
@@ -481,32 +506,172 @@ class ChunkStore:
                 d["chunk_index"] = 0
                 idx = 0
             indexes.append(int(idx))
-            rows.append(tuple(d.get(k) for k in _COLS) + (json.dumps(d.get("extra") or {}),))
-        if not rows:
-            return 0
+            if not d.get("lang"):
+                d["lang"] = DEFAULT_LANG
+            digest = d.get("content_hash") or hash_content(d.get("text") or "")
+            d["content_hash"] = digest
+            extra = dict(d.get("extra") or {})
+            extra.setdefault("content_hash", digest)
+            d["extra"] = extra
+            rows.append(tuple(d.get(k) for k in _COLS) + (json.dumps(extra),))
+        return rows, indexes, nulls
+
+    def _insert_sql(self) -> str:
         placeholders = ",".join(["%s"] * (len(_COLS) + 1))
         collist = ",".join(_COLS + ["meta"])
         updates = ",".join(f"{k}=EXCLUDED.{k}" for k in _COLS if k != "chunk_id")
         # Leave created_at on conflict so re-ingests do not advance the backup watermark.
-        sql = (f"INSERT INTO {self.chunks} ({collist}) VALUES ({placeholders}) "
-               f"ON CONFLICT (chunk_id) DO UPDATE SET {updates}, meta=EXCLUDED.meta")
-        with self._connect() as conn, conn.cursor() as cur:
-            cur.executemany(sql, rows)
-            conn.commit()
+        return (f"INSERT INTO {self.chunks} ({collist}) VALUES ({placeholders}) "
+                f"ON CONFLICT (chunk_id) DO UPDATE SET {updates}, meta=EXCLUDED.meta")
+
+    def _lookup_content_hashes(self, cur, hashes: list[str]) -> dict[str, tuple]:
+        """``content_hash -> (chunk_id, source_id, meta)`` for existing children."""
+        wanted = [h for h in hashes if h]
+        if not wanted:
+            return {}
+        cur.execute(
+            f"SELECT content_hash, chunk_id, source_id, meta FROM {self.chunks} "
+            f"WHERE is_parent IS NOT TRUE AND content_hash = ANY(%s)",
+            (wanted,),
+        )
+        out: dict[str, tuple] = {}
+        for row in cur.fetchall() or []:
+            out[row[0]] = (row[1], row[2], row[3] or {})
+        return out
+
+    def _append_also_in(self, cur, chunk_id: str, alias_source: str, meta) -> None:
+        if isinstance(meta, str):
+            try:
+                meta = json.loads(meta)
+            except Exception:
+                meta = {}
+        meta = dict(meta or {})
+        also = [x for x in (meta.get("also_in") or []) if x]
+        if alias_source and alias_source not in also:
+            also.append(alias_source)
+        meta["also_in"] = also
+        cur.execute(
+            f"UPDATE {self.chunks} SET meta = %s::jsonb WHERE chunk_id = %s",
+            (json.dumps(meta), chunk_id),
+        )
+
+    def _upsert_on(self, cur, chunks: list[Chunk]) -> int:
+        """Insert rows on ``cur``, merging cross-source content_hash hits into also_in."""
+        if not chunks:
+            return 0
+        child_hashes = [
+            (c.content_hash or hash_content(c.text))
+            for c in chunks if not c.is_parent
+        ]
+        existing = self._lookup_content_hashes(cur, child_hashes)
+        kept: list[Chunk] = []
+        seen_hash: set[str] = set()
+        merged = 0
+        for c in chunks:
+            if c.is_parent:
+                kept.append(c)
+                continue
+            digest = c.content_hash or hash_content(c.text)
+            c.content_hash = digest
+            if digest in seen_hash:
+                continue
+            hit = existing.get(digest)
+            if hit and hit[1] != c.source_id:
+                self._append_also_in(cur, hit[0], c.source_id, hit[2])
+                merged += 1
+                continue
+            seen_hash.add(digest)
+            kept.append(c)
+        rows, indexes, nulls = self._prepare_upsert_rows(kept)
+        if rows:
+            cur.executemany(self._insert_sql(), rows)
         log.info(
-            "upsert %d row(s) into '%s'; chunk_index min=%s max=%s nulls=%d",
-            len(rows), self.chunks,
+            "upsert %d row(s) into '%s' (merged_also_in=%d); "
+            "chunk_index min=%s max=%s nulls=%d",
+            len(rows), self.chunks, merged,
             min(indexes) if indexes else None,
             max(indexes) if indexes else None,
             nulls,
         )
         return len(rows)
 
+    def upsert(self, chunks: Iterable[Chunk]) -> int:
+        """Insert/update chunk rows (source of truth). Idempotent by chunk_id.
+        Does NOT touch the vectors table. Duplicate child ``content_hash``
+        values from another source update ``meta.also_in`` instead of inserting.
+        """
+        chunk_list = list(chunks)
+        if not chunk_list:
+            return 0
+        with self._connect() as conn, conn.cursor() as cur:
+            n = self._upsert_on(cur, chunk_list)
+            conn.commit()
+        return n
+
+    def replace_source(self, source_id: str, chunks: Iterable[Chunk]) -> int:
+        """Delete ``source_id`` then upsert ``chunks`` in one transaction.
+
+        Re-running the same source leaves counts unchanged when the payload is
+        identical. Embeddings of deleted rows cascade.
+        """
+        chunk_list = list(chunks)
+        with self._connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                f"DELETE FROM {self.chunks} WHERE source_id = %s",
+                (source_id,))
+            deleted = cur.rowcount or 0
+            n = self._upsert_on(cur, chunk_list)
+            conn.commit()
+        log.info(
+            "replace_source %s: deleted=%d upserted=%d",
+            source_id, deleted, n,
+        )
+        return n
+
+    def find_canonical_source_by_sha256(self, sha256: str) -> Optional[str]:
+        """First-ingested ``source_id`` whose ``meta.sha256`` matches."""
+        if not sha256:
+            return None
+        with self._connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                f"SELECT source_id FROM {self.chunks} "
+                f"WHERE meta->>'sha256' = %s "
+                f"ORDER BY created_at ASC NULLS LAST LIMIT 1",
+                (sha256,),
+            )
+            row = cur.fetchone()
+        return row[0] if row and row[0] else None
+
+    def record_source_alias(self, canonical_source_id: str, alias_source_id: str
+                            ) -> int:
+        """Append ``alias_source_id`` to ``meta.also_in`` on the canonical source."""
+        if not canonical_source_id or not alias_source_id:
+            return 0
+        if canonical_source_id == alias_source_id:
+            return 0
+        with self._connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                f"SELECT chunk_id, meta FROM {self.chunks} WHERE source_id = %s",
+                (canonical_source_id,),
+            )
+            rows = cur.fetchall() or []
+            n = 0
+            for chunk_id, meta in rows:
+                self._append_also_in(cur, chunk_id, alias_source_id, meta)
+                n += 1
+            conn.commit()
+        log.info(
+            "recorded alias %s -> canonical %s (%d row(s))",
+            alias_source_id, canonical_source_id, n,
+        )
+        return n
+
     def delete_by_source_id(self, source_id: str) -> int:
         """Delete every row for ``source_id``. Embeddings cascade.
 
         Re-crawls can shift ``chunk_index`` (and therefore ``chunk_id``). A
         bare upsert would leave orphan rows; delete-then-reingest is required.
+        Prefer ``replace_source`` so delete + upsert share one transaction.
         """
         with self._connect() as conn, conn.cursor() as cur:
             cur.execute(
@@ -528,11 +693,16 @@ class ChunkStore:
         crashed re-embed job resumes by skipping already-labelled rows.
         """
         if not reembed:
-            return "v.chunk_id IS NULL AND c.is_parent = false", ()
+            return (
+                "v.chunk_id IS NULL AND c.is_parent = false "
+                f"AND {_QUALITY_EMBED_OK}",
+                (),
+            )
         if not (model or "").strip():
             raise ValueError("reembed requires a target model label")
         return (
-            "c.is_parent = false AND ("
+            "c.is_parent = false AND "
+            f"{_QUALITY_EMBED_OK} AND ("
             "v.chunk_id IS NULL OR v.model IS NULL OR btrim(v.model) = '' "
             "OR v.model IS DISTINCT FROM %s)",
             ((model or "").strip(),),

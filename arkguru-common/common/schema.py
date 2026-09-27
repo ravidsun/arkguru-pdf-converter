@@ -33,6 +33,11 @@ def _stable_hash(*parts: str) -> str:
     return h[:16]
 
 
+def content_hash(text: str) -> str:
+    """SHA-256 of stripped chunk text. Used for cross-source child uniqueness."""
+    return hashlib.sha256((text or "").strip().encode("utf-8")).hexdigest()
+
+
 @dataclass
 class Chunk:
     """A single retrievable unit of text plus its provenance."""
@@ -60,6 +65,7 @@ class Chunk:
     overlap_tokens: int = 0
     embedding: Optional[list[float]] = None   # optional; usually filled in Phase 3
     extra: dict[str, Any] = field(default_factory=dict)  # domain-specific fields
+    content_hash: Optional[str] = None  # sha256 of stripped text (children)
     chunk_id: str = ""                 # auto-filled deterministic id
     schema_version: str = SCHEMA_VERSION
     created_at: float = field(default_factory=lambda: time.time())
