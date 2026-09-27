@@ -6,6 +6,7 @@ trafilatura>=1.12
 datasketch>=1.6
 pyyaml>=6.0
 tiktoken>=0.7
+langdetect>=1.0.9        # per-chunk language (shared with Phase 1)
 # optional: Postgres sink uses common[postgres]
 # psycopg[binary]>=3.2
 # pgvector>=0.3

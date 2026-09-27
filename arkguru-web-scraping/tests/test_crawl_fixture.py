@@ -61,7 +61,11 @@ def test_crawl_counts_http_errors_toward_per_seed_budget():
             return httpx.Response(200, text="User-agent: *\nAllow: /\n")
         if path == "/":
             anchors = "".join(f'<a href="/missing/{i}">x</a>' for i in range(40))
-            html = f"<!DOCTYPE html><html><body><p>Seed page.</p>{anchors}</body></html>"
+            html = (
+                "<!DOCTYPE html><html><body><p>"
+                + "The seventh house and Saturn in this seed article. " * 12
+                + f"</p>{anchors}</body></html>"
+            )
             return httpx.Response(200, headers={"content-type": "text/html"}, content=html.encode())
         return httpx.Response(404)
 

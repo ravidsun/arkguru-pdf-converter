@@ -8,8 +8,10 @@ Extraction backends (auto-selected, override via config):
 
 Scanned / image-only pages are detected (near-zero extractable text) and, if
 `ocr.enabled`, routed through an OCR pass (ocrmypdf preferred; pytesseract as a
-per-page fallback). Everything degrades gracefully: a missing optional library
-disables that backend rather than crashing the run.
+per-page fallback) with configurable Tesseract languages (default
+``eng+hin+san``). Per-source ``force_ocr`` re-OCRs garbled native layers.
+Everything degrades gracefully: a missing optional library disables that
+backend rather than crashing the run.
 
 Output of `extract_document()` is a `Document` of `Block`s -- backend-neutral,
 so `chunk.py` never needs to know which extractor ran.
@@ -33,7 +35,24 @@ from common.tables import (
     linearize_table,
     rows_from_markdown,
 )
+from common.quality import source_matches
 from common.text import clean_text
+
+DEFAULT_OCR_LANGUAGES = "eng+hin+san"
+# Garbled native layers observed in the live corpus (BPHS Sharma vols,
+# J_KP readers 4 Marriage and 5 Transits). Matched against source_id.
+DEFAULT_FORCE_OCR = (
+    "*BPHS*Sharma*",
+    "*Brihat*Parasara*Sharma*",
+    "*Brihat*Parashara*Sharma*",
+    "*Girish*Chand*Sharma*",
+    "*J_KP*4*",
+    "*J_KP*Marriage*",
+    "*J_KP*reader*4*",
+    "*J_KP*5*",
+    "*J_KP*Transit*",
+    "*J_KP*reader*5*",
+)
 
 log = logging.getLogger("phase1.extract")
 
@@ -203,7 +222,10 @@ def _ocr_engine():
         return None
 
 
-def _extract_figures(pdf, page, page_num: int, heading: Optional[str]) -> list["Block"]:
+def _extract_figures(
+    pdf, page, page_num: int, heading: Optional[str],
+    ocr_languages: str = DEFAULT_OCR_LANGUAGES,
+) -> list["Block"]:
     """OCR embedded images (diagrams/charts/graphs) so their text is captured.
 
     Skipped silently if pytesseract/Pillow are not installed -- this is an
@@ -220,7 +242,8 @@ def _extract_figures(pdf, page, page_num: int, heading: Optional[str]) -> list["
         try:
             base = pdf.extract_image(xref)
             im = Image.open(io.BytesIO(base["image"]))
-            text = clean_text(pytesseract.image_to_string(im))
+            text = clean_text(pytesseract.image_to_string(
+                im, lang=ocr_languages or DEFAULT_OCR_LANGUAGES))
         except Exception:
             continue
         if _figure_text_is_usable(text):
@@ -253,6 +276,7 @@ def _should_ocr_figures(page) -> bool:
 
 def _augment_with_tables_and_figures(
     doc: "Document", path: Path, extract_tables: bool, extract_figures: bool,
+    ocr_languages: str = DEFAULT_OCR_LANGUAGES,
 ) -> None:
     """Insert table/figure blocks (in page order) into an already-extracted doc."""
     if not extract_tables and not extract_figures:
@@ -277,7 +301,8 @@ def _augment_with_tables_and_figures(
             if extract_tables:
                 extra_blocks.extend(_extract_tables(page, i, heading))
             if extract_figures and _should_ocr_figures(page):
-                extra_blocks.extend(_extract_figures(pdf, page, i, heading))
+                extra_blocks.extend(_extract_figures(
+                    pdf, page, i, heading, ocr_languages=ocr_languages))
     doc.blocks.extend(extra_blocks)
 
 
@@ -285,7 +310,8 @@ def _augment_with_tables_and_figures(
 # Backends
 # ---------------------------------------------------------------------------
 def _extract_pymupdf4llm(path: Path, extract_tables: bool = True,
-                         extract_figures: bool = True) -> Document:
+                         extract_figures: bool = True,
+                         ocr_languages: str = DEFAULT_OCR_LANGUAGES) -> Document:
     import pymupdf4llm
     # page_chunks=True returns one dict per page with 'text' (markdown) + meta.
     pages = pymupdf4llm.to_markdown(str(path), page_chunks=True)
@@ -297,12 +323,14 @@ def _extract_pymupdf4llm(path: Path, extract_tables: bool = True,
     if pages and isinstance(pages[0], dict):
         doc.meta = pages[0].get("metadata", {}) or {}
         doc.title = _norm_title(doc.meta.get("title"))
-    _augment_with_tables_and_figures(doc, path, extract_tables, extract_figures)
+    _augment_with_tables_and_figures(
+        doc, path, extract_tables, extract_figures, ocr_languages=ocr_languages)
     return doc
 
 
 def _extract_docling(path: Path, extract_tables: bool = True,
-                     extract_figures: bool = True) -> Document:
+                     extract_figures: bool = True,
+                     ocr_languages: str = DEFAULT_OCR_LANGUAGES) -> Document:
     from docling.document_converter import DocumentConverter
     conv = DocumentConverter()
     result = conv.convert(str(path))
@@ -319,7 +347,8 @@ def _extract_docling(path: Path, extract_tables: bool = True,
 
 
 def _extract_pymupdf(path: Path, extract_tables: bool = True,
-                     extract_figures: bool = True) -> Document:
+                     extract_figures: bool = True,
+                     ocr_languages: str = DEFAULT_OCR_LANGUAGES) -> Document:
     import pymupdf  # aka fitz
     doc = Document(source_id=path.name)
     with pymupdf.open(str(path)) as pdf:
@@ -329,7 +358,8 @@ def _extract_pymupdf(path: Path, extract_tables: bool = True,
             text = clean_text(page.get_text("text"))
             if text:
                 doc.blocks.append(Block(text=text, page=i))
-    _augment_with_tables_and_figures(doc, path, extract_tables, extract_figures)
+    _augment_with_tables_and_figures(
+        doc, path, extract_tables, extract_figures, ocr_languages=ocr_languages)
     return doc
 
 
@@ -359,12 +389,24 @@ def _needs_ocr(path: Path, min_chars_per_page: int = 40) -> bool:
     return _scanned_page_ratio(path, min_chars_per_page) > 0.0
 
 
-def _ocr_to_searchable(path: Path, out_dir: Path) -> Optional[Path]:
-    """Run ocrmypdf to add a text layer to scanned/image-only pages.
+def should_force_ocr(source_id: str, patterns: list[str] | tuple[str, ...] | None
+                     ) -> bool:
+    """True when ``source_id`` matches a configured force_ocr glob."""
+    return source_matches(source_id, patterns)
 
-    Uses `skip_text=True` (rather than `force_ocr`) so pages that already
-    contain a native text layer are left byte-for-byte alone -- this is what
-    makes OCR safe to run on mixed scanned/native documents.
+
+def _ocr_to_searchable(
+    path: Path,
+    out_dir: Path,
+    *,
+    language: str = DEFAULT_OCR_LANGUAGES,
+    force_ocr: bool = False,
+) -> Optional[Path]:
+    """Run ocrmypdf to add a text layer.
+
+    Default (``force_ocr=False``): ``skip_text=True`` so native-text pages are
+    left alone. ``force_ocr=True`` re-OCRs every page (garbled text layers).
+    ``language`` is a Tesseract pack list such as ``eng+hin+san``.
     """
     try:
         import ocrmypdf
@@ -374,8 +416,13 @@ def _ocr_to_searchable(path: Path, out_dir: Path) -> Optional[Path]:
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / f"ocr_{path.name}"
     try:
-        ocrmypdf.ocr(str(path), str(out_path), skip_text=True,
-                     force_ocr=False, progress_bar=False)
+        ocrmypdf.ocr(
+            str(path), str(out_path),
+            language=language or DEFAULT_OCR_LANGUAGES,
+            skip_text=not force_ocr,
+            force_ocr=bool(force_ocr),
+            progress_bar=False,
+        )
         return out_path
     except Exception as e:  # pragma: no cover
         log.warning("OCR failed for %s: %s", path.name, e)
@@ -400,13 +447,21 @@ def extract_document(
     extract_tables: bool = True,
     extract_figures: bool = True,
     source_id: str | None = None,
+    ocr_languages: str = DEFAULT_OCR_LANGUAGES,
+    force_ocr: bool = False,
 ) -> Document:
     path = Path(path)
     original = path
-    if ocr_enabled and _needs_ocr(path):
-        ratio = _scanned_page_ratio(path)
-        log.info("%s looks scanned (%.0f%% of pages) -> OCR", path.name, ratio * 100)
-        ocred = _ocr_to_searchable(path, Path(interim_dir))
+    langs = ocr_languages or DEFAULT_OCR_LANGUAGES
+    run_ocr = ocr_enabled and (force_ocr or _needs_ocr(path))
+    if run_ocr:
+        if force_ocr:
+            log.info("%s force_ocr=True (%s) -> OCR", path.name, langs)
+        else:
+            ratio = _scanned_page_ratio(path)
+            log.info("%s looks scanned (%.0f%% of pages) -> OCR", path.name, ratio * 100)
+        ocred = _ocr_to_searchable(
+            path, Path(interim_dir), language=langs, force_ocr=force_ocr)
         if ocred is not None:
             path = ocred
 
@@ -416,17 +471,21 @@ def extract_document(
         raise ValueError(f"Unknown backend '{backend}'. Options: {list(_BACKENDS)}")
 
     try:
-        doc = fn(path, extract_tables=extract_tables, extract_figures=extract_figures)
+        doc = fn(
+            path, extract_tables=extract_tables, extract_figures=extract_figures,
+            ocr_languages=langs,
+        )
     except ImportError as e:
         log.warning("Backend '%s' unavailable (%s); falling back to pymupdf.",
                     backend, e)
         used = "pymupdf"
-        doc = _extract_pymupdf(path, extract_tables=extract_tables,
-                               extract_figures=extract_figures)
+        doc = _extract_pymupdf(
+            path, extract_tables=extract_tables, extract_figures=extract_figures,
+            ocr_languages=langs,
+        )
 
     doc.source_id = source_id if source_id else original.name
     strip_repeating_headers_footers(doc)
-    _detect_lang(doc)
     _attach_provenance(doc, original, used)
     return doc
 
@@ -519,10 +578,8 @@ def _attach_provenance(doc: Document, path: Path, backend: str) -> None:
 
 
 def _detect_lang(doc: Document) -> None:
-    try:
-        from langdetect import detect
-        sample = " ".join(b.text for b in doc.blocks[:5])[:2000]
-        if sample.strip():
-            doc.lang = detect(sample)
-    except Exception:
-        doc.lang = None
+    """Deprecated document-level stamp. Language is now per-chunk (common.lang)."""
+    from common.lang import detect_lang
+
+    sample = " ".join(b.text for b in doc.blocks[:5])[:2000]
+    doc.lang = detect_lang(sample) if sample.strip() else None

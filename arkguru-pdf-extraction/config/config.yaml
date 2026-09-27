@@ -4,7 +4,7 @@ phase1:
   out_dir: "data/processed"     # data/processed/{relative_stem}/chunks.jsonl (+ parents/tables/figures if any)
   out_format: "jsonl"        # jsonl | parquet
   backend: "pymupdf4llm"     # pymupdf4llm (fast) | docling (tables) | pymupdf (raw)
-  strategy: "structure"      # structure | parent_child | semantic
+  strategy: "parent_child"   # parent_child (default) | structure | semantic
   target_tokens: 400         # smaller windows -> more precise retrieval
   overlap_pct: 0.15
   min_tokens: 80             # merge trailing slivers smaller than this
@@ -14,9 +14,30 @@ phase1:
   min_figure_chars: 40       # minimum figure-OCR body
   parent_max_tokens: 2000
   ocr_enabled: true          # OCRs scanned pages; safe on mixed scanned/native PDFs
+  ocr_languages: "eng+hin+san"  # Tesseract packs: eng + hin + san
+  # Re-OCR even when a (garbled) text layer exists. Globs match source_id.
+  force_ocr:
+    - "*BPHS*Sharma*"
+    - "*Brihat*Parasara*Sharma*"
+    - "*Brihat*Parashara*Sharma*"
+    - "*Girish*Chand*Sharma*"
+    - "*J_KP*4*"
+    - "*J_KP*Marriage*"
+    - "*J_KP*reader*4*"
+    - "*J_KP*5*"
+    - "*J_KP*Transit*"
+    - "*J_KP*reader*5*"
   extract_tables: true       # true = keep, linearised header:value; false = drop
   extract_figures: true      # OCR embedded diagrams/charts/graphs (needs pytesseract)
   dedup: true
+  quality:
+    enabled: true
+    min_score: 0.35
+    min_alpha_ratio: 0.28
+    max_punct_run: 0.18
+    min_word_share: 0.22
+    allow_sources: []        # globs that never fail the gate
+    deny_sources: []         # globs that always fail (flagged, not embedded)
   # --- scaling ---
   workers: 0             # 0 = auto (cpu_count-1); 1 = single process
   # --- datastore sink (optional; default writes files to out_dir) ---

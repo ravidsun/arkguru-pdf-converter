@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 from collections import deque
 from dataclasses import dataclass, field
@@ -17,6 +18,9 @@ DEFAULT_PATH_DENY = (
     "/login", "/signup", "/sign-in", "/sign-up", "/cart", "/checkout",
     "/chat", "/call", "/account", "/auth", "/wp-admin", "/wp-login",
 )
+
+# Follow links on these pages, but do not ingest their body as chunks.
+DEFAULT_MAX_LINK_DENSITY = 0.60
 
 BINARY_SUFFIXES = (
     ".exe", ".zip", ".msi", ".dmg", ".pkg", ".gz", ".rar", ".7z",
@@ -74,6 +78,50 @@ def path_denied(url: str, deny: Iterable[str] = DEFAULT_PATH_DENY) -> bool:
         if path == p or path.startswith(p + "/"):
             return True
     return False
+
+
+_INGEST_SITEMAP = re.compile(r"site-?map", re.I)
+_INGEST_TAG = re.compile(r"/tags?(?:/|$)", re.I)
+_INGEST_CAT = re.compile(r"/categor(?:y|ies)(?:/|$)", re.I)
+_INGEST_PAGE_N = re.compile(r"/page/\d+(?:/|$)", re.I)
+_INGEST_ARCHIVE = re.compile(r"/archives?(?:/|$)", re.I)
+
+
+def ingest_path_denied(url: str) -> bool:
+    """True for site-map / tag / category / /page/N / archive listing pages.
+
+    These URLs are still fetched so their links can be followed; they are not
+    turned into chunks.
+    """
+    parsed = urlparse(url)
+    path = (parsed.path or "/").lower()
+    blob = f"{path} {parsed.query or ''}"
+    if _INGEST_SITEMAP.search(blob) or _INGEST_SITEMAP.search(url):
+        return True
+    if _INGEST_TAG.search(path):
+        return True
+    if _INGEST_CAT.search(path):
+        return True
+    if _INGEST_PAGE_N.search(path):
+        return True
+    if _INGEST_ARCHIVE.search(path):
+        return True
+    return False
+
+
+def link_density(html: str) -> float:
+    """Share of visible text that lives inside ``<a>`` tags (0..1)."""
+    if not html:
+        return 0.0
+    cleaned = re.sub(r"(?is)<(script|style|noscript).*?>.*?</\1>", " ", html)
+    anchors = re.findall(r"(?is)<a\b[^>]*>(.*?)</a>", cleaned)
+    link_txt = " ".join(re.sub(r"(?is)<[^>]+>", " ", a) for a in anchors)
+    all_txt = re.sub(r"(?is)<[^>]+>", " ", cleaned)
+    link_txt = " ".join(link_txt.split())
+    all_txt = " ".join(all_txt.split())
+    if not all_txt:
+        return 1.0 if link_txt else 0.0
+    return len(link_txt) / len(all_txt)
 
 
 def is_binary_url(url: str) -> bool:
@@ -223,6 +271,7 @@ def crawl(
     path_deny: Iterable[str] = DEFAULT_PATH_DENY,
     timeout: float = 20.0,
     client=None,
+    max_link_density: float = DEFAULT_MAX_LINK_DENSITY,
 ) -> CrawlResult:
     """BFS per seed. HTML pages go to ``pages``; PDF URLs are listed, not fetched
     as HTML (``pdfs.download_pdfs`` pulls the bytes later)."""
@@ -293,7 +342,6 @@ def crawl(
                     out.skipped += 1
                     per_seed += 1
                     continue
-                out.pages.append(page)
                 per_seed += 1
                 for href in extract_links(page.html, page.url):
                     try:
@@ -302,6 +350,13 @@ def crawl(
                         continue
                     if n not in seen:
                         q.append(n)
+                if ingest_path_denied(page.url):
+                    out.skipped += 1
+                    continue
+                if max_link_density is not None and link_density(page.html) > max_link_density:
+                    out.skipped += 1
+                    continue
+                out.pages.append(page)
             log.info("seed %s -> %d pages this seed", seed, per_seed)
     finally:
         if own_client:

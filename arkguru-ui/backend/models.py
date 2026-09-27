@@ -17,7 +17,7 @@ class Phase1Request(BaseModel):
     input_dir: str | None = None
     out_dir: str | None = None
     backend: Phase1Backend = "pymupdf4llm"
-    strategy: Phase1Strategy = "structure"
+    strategy: Phase1Strategy = "parent_child"
     ocr_enabled: bool = True
     extract_figures: bool = True
     extract_tables: bool = True

@@ -1,6 +1,7 @@
 from .schema import (
     Chunk,
     SCHEMA_VERSION,
+    content_hash,
     read_jsonl,
     write_jsonl,
     read_parquet,
@@ -21,9 +22,11 @@ from .tokenizer import (
 )
 from .chunking import split_sentences, split_paragraphs, split_for_packing, pack_windows
 from .text import clean_text, body_without_heading
+from .lang import DEFAULT_LANG, detect_lang, lang_or_und, reconcile_lang, script_family
+from .quality import QualityScore, annotate_chunks, score_quality, source_matches
 
 __all__ = [
-    "Chunk", "SCHEMA_VERSION",
+    "Chunk", "SCHEMA_VERSION", "content_hash",
     "read_jsonl", "write_jsonl", "read_parquet", "write_parquet",
     "count_tokens", "truncate_to_tokens", "split_to_max_tokens",
     "effective_max_tokens", "resolve_tokenizer", "reset_tokenizer_cache",
@@ -32,6 +35,8 @@ __all__ = [
     "DEFAULT_HF_TOKENIZER", "MODEL_MAX_SEQ_LENGTH",
     "split_sentences", "split_paragraphs", "split_for_packing", "pack_windows",
     "clean_text", "body_without_heading",
+    "DEFAULT_LANG", "detect_lang", "lang_or_und", "reconcile_lang", "script_family",
+    "QualityScore", "annotate_chunks", "score_quality", "source_matches",
 ]
 from .datastore import ChunkStore
 __all__.append("ChunkStore")

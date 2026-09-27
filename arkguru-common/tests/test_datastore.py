@@ -558,3 +558,79 @@ def test_open_chunk_store_reads_schema(tmp_path):
     assert store.schema == "web"
     assert store.chunks == "web.chunks"
     assert store.search_fn == "web.search_chunks"
+
+
+def test_migrate_adds_content_hash_and_lang_und():
+    cur = _FakeCursor()
+    _migrate_chunk_columns(cur, "chunks")
+    joined = " ".join(cur.sqls)
+    assert "ADD COLUMN IF NOT EXISTS content_hash" in joined
+    assert "SET lang = 'und'" in joined
+    assert "ALTER COLUMN lang SET NOT NULL" in joined
+    assert "chunks_content_hash_child_uidx" in joined
+    assert "WHERE is_parent IS NOT TRUE" in joined
+
+
+def test_embedding_clause_skips_quality_failures_and_parents():
+    where, _ = _store()._embedding_work_clause(model=None, reembed=False)
+    assert "is_parent = false" in where
+    assert "quality" in where
+    assert "embed" in where
+
+
+def test_replace_source_deletes_then_upserts_one_commit(monkeypatch):
+    commits = {"n": 0}
+
+    class _Conn(_FakeConn):
+        def commit(self):
+            commits["n"] += 1
+
+    cur = _FakeCursor()
+    conn = _Conn(cur)
+    monkeypatch.setattr(ChunkStore, "_connect", lambda self: conn)
+    a = Chunk(text="same body", source_type="pdf", source_id="a.pdf", chunk_index=0)
+    n = _store().replace_source("a.pdf", [a])
+    assert n == 1
+    assert commits["n"] == 1
+    assert any("DELETE FROM chunks WHERE source_id" in s for s in cur.sqls)
+    assert any("INSERT INTO chunks" in s for s in cur.sqls)
+    delete_i = next(i for i, s in enumerate(cur.sqls) if s.startswith("DELETE"))
+    insert_i = next(i for i, s in enumerate(cur.sqls) if "INSERT INTO" in s)
+    assert delete_i < insert_i
+
+
+def test_upsert_merges_duplicate_content_hash_into_also_in(monkeypatch):
+    from common.schema import content_hash
+
+    digest = content_hash("identical child text")
+    existing = [(digest, "canon-id", "first.pdf", {"sha256": "abc"})]
+    cur = _FakeCursor(rows=existing)
+    conn = _FakeConn(cur)
+    monkeypatch.setattr(ChunkStore, "_connect", lambda self: conn)
+    dup = Chunk(
+        text="identical child text",
+        source_type="pdf", source_id="second.pdf", chunk_index=0,
+    )
+    n = _store().upsert([dup])
+    assert n == 0
+    assert any("UPDATE chunks SET meta" in s for s in cur.sqls)
+    meta_param = None
+    for sql, params in zip(cur.sqls, cur.params_list):
+        if "UPDATE chunks SET meta" in sql:
+            meta_param = params[0]
+    assert meta_param and "second.pdf" in meta_param
+
+
+def test_find_canonical_and_record_alias(monkeypatch):
+    cur = _FakeCursor(rows=[("first.pdf",)])
+    conn = _FakeConn(cur)
+    monkeypatch.setattr(ChunkStore, "_connect", lambda self: conn)
+    assert _store().find_canonical_source_by_sha256("deadbeef") == "first.pdf"
+    assert "meta->>'sha256'" in cur.sql
+
+    cur2 = _FakeCursor(rows=[("cid1", {"also_in": []})])
+    conn2 = _FakeConn(cur2)
+    monkeypatch.setattr(ChunkStore, "_connect", lambda self: conn2)
+    n = _store().record_source_alias("first.pdf", "copy/folder.pdf")
+    assert n == 1
+    assert any("also_in" in (p[0] if p else "") for p in cur2.params_list if p)

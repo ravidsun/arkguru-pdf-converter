@@ -5,12 +5,12 @@ Implements three complementary strategies (selectable via config):
 
   1. "structure"  -- structure-aware. Group blocks under their nearest heading,
                      then pack into ~target-token windows with % overlap.
-                     Never crosses a heading boundary. Good default.
+                     Never crosses a heading boundary.
 
-  2. "parent_child" -- emit BOTH a large "parent" chunk (whole section, capped)
-                     and the small "child" windows inside it. Retrieval matches
-                     on small children (precise) but you can fetch the parent for
-                     full context at answer time (parent_id links them).
+  2. "parent_child" -- default. Emit BOTH a large "parent" chunk (whole
+                     section, capped) and the small "child" windows inside it.
+                     Every PDF child gets a parent_id; parents are not
+                     embedded. Retrieval matches on children and expands.
 
   3. "semantic"   -- split section text at sentence boundaries where adjacent
                      sentence groups drift in meaning. Uses an embedding model if
@@ -232,7 +232,7 @@ def _keep_chunk(
 # ---------------------------------------------------------------------------
 def chunk_document(
     doc: Document,
-    strategy: str = "structure",
+    strategy: str = "parent_child",
     target_tokens: int = DEFAULT_TARGET_TOKENS,
     overlap_pct: float = 0.15,
     parent_max_tokens: int = 2000,
@@ -285,19 +285,7 @@ def chunk_document(
         page = pages[0] if pages else None
         extra = _section_extra(doc, body)
 
-        parent_id = None
-        if strategy == "parent_child" and section_text:
-            parent = Chunk(
-                text=_cap(section_text, parent_max_tokens),
-                source_type="pdf", source_id=doc.source_id, chunk_index=idx,
-                title=doc.title, section=heading, page=page, lang=doc.lang,
-                is_parent=True,
-                token_count=count_tokens(section_text),
-                extra=dict(extra),
-            )
-            chunks.append(parent)
-            parent_id = parent.chunk_id
-            idx += 1
+        child_specs: list[dict] = []
 
         if section_text:
             units = split_for_packing(section_text)
@@ -320,17 +308,12 @@ def chunk_document(
                         min_chunk_chars, min_table_chars, min_figure_chars,
                     ):
                         continue
-                    chunks.append(Chunk(
-                        text=text,
-                        source_type="pdf", source_id=doc.source_id, chunk_index=idx,
-                        title=doc.title, section=heading,
-                        page=_page_for_window(w_text, prose_blocks, page),
-                        lang=doc.lang,
-                        parent_id=parent_id, is_parent=False,
-                        token_count=count_tokens(text), overlap_tokens=ov,
-                        extra=dict(extra),
-                    ))
-                    idx += 1
+                    child_specs.append({
+                        "text": text,
+                        "page": _page_for_window(w_text, prose_blocks, page),
+                        "overlap": ov,
+                        "extra": dict(extra),
+                    })
 
         for b in special_blocks:
             kind = b.block_type
@@ -347,43 +330,62 @@ def chunk_document(
                 else:
                     pieces = [raw] if raw.strip() else []
             for piece in pieces:
-                if count_tokens(piece) > cap:
-                    for hard in split_to_max_tokens(piece, cap, overlap_tokens=0):
-                        text = _prefixed(heading, hard)
-                        if not _keep_chunk(
-                            text, heading, kind,
-                            min_chunk_chars, min_table_chars, min_figure_chars,
-                        ):
-                            continue
-                        spec = dict(extra)
-                        spec["block_type"] = kind
-                        chunks.append(Chunk(
-                            text=text,
-                            source_type="pdf", source_id=doc.source_id, chunk_index=idx,
-                            title=doc.title, section=heading, page=b.page, lang=doc.lang,
-                            parent_id=parent_id, is_parent=False,
-                            token_count=count_tokens(text),
-                            extra=spec,
-                        ))
-                        idx += 1
-                    continue
-                text = _prefixed(heading, piece)
-                if not _keep_chunk(
-                    text, heading, kind,
-                    min_chunk_chars, min_table_chars, min_figure_chars,
-                ):
-                    continue
-                spec = dict(extra)
-                spec["block_type"] = kind
-                chunks.append(Chunk(
-                    text=text,
-                    source_type="pdf", source_id=doc.source_id, chunk_index=idx,
-                    title=doc.title, section=heading, page=b.page, lang=doc.lang,
-                    parent_id=parent_id, is_parent=False,
-                    token_count=count_tokens(text),
-                    extra=spec,
-                ))
-                idx += 1
+                hard_pieces = (
+                    split_to_max_tokens(piece, cap, overlap_tokens=0)
+                    if count_tokens(piece) > cap
+                    else [piece]
+                )
+                for hard in hard_pieces:
+                    text = _prefixed(heading, hard)
+                    if not _keep_chunk(
+                        text, heading, kind,
+                        min_chunk_chars, min_table_chars, min_figure_chars,
+                    ):
+                        continue
+                    spec = dict(extra)
+                    spec["block_type"] = kind
+                    child_specs.append({
+                        "text": text,
+                        "page": b.page,
+                        "overlap": 0,
+                        "extra": spec,
+                    })
+
+        if not child_specs:
+            continue
+
+        parent_id = None
+        if strategy == "parent_child":
+            special_text = "\n".join(
+                b.text for b in special_blocks if (b.text or "").strip()
+            )
+            parent_body = section_text or special_text
+            parent_text = _prefixed(heading, parent_body) if parent_body else (heading or "")
+            parent = Chunk(
+                text=_cap(parent_text, parent_max_tokens),
+                source_type="pdf", source_id=doc.source_id, chunk_index=idx,
+                title=doc.title, section=heading, page=page, lang=doc.lang,
+                is_parent=True,
+                token_count=count_tokens(parent_text),
+                extra=dict(extra),
+            )
+            chunks.append(parent)
+            parent_id = parent.chunk_id
+            idx += 1
+
+        for spec in child_specs:
+            chunks.append(Chunk(
+                text=spec["text"],
+                source_type="pdf", source_id=doc.source_id, chunk_index=idx,
+                title=doc.title, section=heading,
+                page=spec["page"],
+                lang=doc.lang,
+                parent_id=parent_id, is_parent=False,
+                token_count=count_tokens(spec["text"]),
+                overlap_tokens=spec["overlap"],
+                extra=spec["extra"],
+            ))
+            idx += 1
 
     return chunks
 

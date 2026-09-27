@@ -55,10 +55,10 @@
 
 **Key features:**
 - **Three extraction backends:** pymupdf4llm (default, fast), docling (complex tables), pymupdf (fallback)
-- **Scanned PDF OCR:** `ocrmypdf` + Tesseract on image-only pages (`skip_text`, native layers untouched). `setup_dev_env.sh` installs the Python libs and, on Debian/Ubuntu, `tesseract-ocr` + `ghostscript`.
+- **Scanned PDF OCR:** `ocrmypdf` + Tesseract (`eng+hin+san`). Default `skip_text` leaves native layers alone; `force_ocr` globs (BPHS Sharma vols, J_KP readers 4/5) re-OCR garbled text layers. A Unicode quality gate flags junk (`meta.quality`) and never embeds it.
 - **Table extraction:** Preserves structure (rows, columns) as standalone markdown chunks
-- **Figure OCR:** `pytesseract` extracts text from diagrams/charts (axis labels, legends)
-- **Three chunking strategies:** `structure` (default, heading windows), `parent_child` (long parent + small children). `semantic` is a CLI/config value but Phase 1 does not pass an embedder, so it uses the same windows as `structure`.
+- **Figure OCR:** `pytesseract` extracts text from diagrams/charts (axis labels, legends) using the same OCR languages
+- **Three chunking strategies:** `parent_child` (default: every PDF child has a parent; parents are not embedded), `structure` (heading windows only). `semantic` is a CLI/config value but Phase 1 does not pass an embedder, so it uses the same windows as `structure`.
 
 **Example workflow:**
 ```bash
@@ -79,19 +79,25 @@ max_tokens: 510           # body cap (bge-m3 512 minus XLM-R specials)
 extract_tables: true      # linearised header:value; false drops tables
 min_chunk_chars: 80       # drop heading-only / tiny leftovers after merge
 ocr_enabled: true         # safe on mixed documents
+ocr_languages: "eng+hin+san"
+force_ocr: ["*BPHS*Sharma*", "*J_KP*4*", "*J_KP*5*", "*J_KP*Marriage*", "*J_KP*Transit*"]
 extract_figures: true     # OCR text in images
 ```
 
-**System dependencies (OCR, installed by `setup_dev_env.sh` on Debian/Ubuntu):**
+**System dependencies (OCR language packs):**
 ```bash
-# Already done by bash scripts/setup_dev_env.sh when apt-get is available:
-#   tesseract-ocr tesseract-ocr-eng ghostscript
-# plus pip: ocrmypdf pytesseract pillow
+# Debian/Ubuntu (also installed by scripts/setup_dev_env.sh):
+sudo apt-get install tesseract-ocr tesseract-ocr-eng tesseract-ocr-hin tesseract-ocr-san ghostscript
 
-# macOS (setup does not brew-install these):
-brew install tesseract ghostscript
+# macOS:
+brew install tesseract ghostscript tesseract-lang
 
-# Windows: Download Tesseract + Ghostscript, add to PATH
+# Windows: UB Mannheim installer
+#   https://github.com/UB-Mannheim/tesseract/wiki
+# During setup tick Additional language data → English, Hindi, Sanskrit
+# (or copy eng.traineddata, hin.traineddata, san.traineddata into
+#  C:\Program Files\Tesseract-OCR\tessdata). Ghostscript from
+#  https://www.ghostscript.com/download/gsdnld.html — add both to PATH.
 ```
 
 ---
@@ -103,12 +109,14 @@ brew install tesseract ghostscript
 **Speed:** ~200–500 ms/page (local backend), ~1–3 s/page (firecrawl)
 
 **Key features:**
-- **Schema `web`:** `--sink postgres` writes `web.chunks` / `web.search_chunks` on the same `PG_DSN` as the books. It **refuses** `public`.
-- **Allowlisted BFS:** astrology article hubs in `config/config.yaml` (Vedic + traditional Western; no commercial Kundli portals); `same_domain_only`, robots.txt, path denylist, Kundli-generator query skip
+- **Same `chunks` table, `source_type='web'`:** re-chunk (`python -m phase2_web.rechunk`) writes into the store you point at. Live crawl `--sink postgres` still refuses `public` (legacy isolation); lift that when re-ingesting into schema `v2`.
+- **Allowlisted BFS:** astrology article hubs in `config/config.yaml`; `same_domain_only`, robots.txt, login/cart denylist, Kundli-generator skip
+- **Ingest filters:** site-map, `/tag/`, `/category/`, `/page/N`, and archive pages are still fetched (links followed) but not chunked. High link-density pages are skipped the same way.
 - **Two fetch backends:** local (trafilatura + httpx, free), firecrawl (JS-heavy sites, paid)
-- **Structure-aware chunking:** Same `pack_windows` logic as Phase 1
+- **Structure-aware chunking:** Same `pack_windows` logic as Phase 1, plus per-chunk language + quality
 - **Near-dedup:** MinHash LSH collapses syndicated/similar pages (Jaccard ≥ 0.9)
-- **PDF harvest:** publicly linked `.pdf` files are downloaded and Phase-1 extracted into schema `web`
+- **PDF harvest:** publicly linked `.pdf` files are downloaded and Phase-1 extracted
+- **Re-chunk CSV:** `python -m phase2_web.rechunk --input web_chunks.csv` runs `clean_text` + the current chunker instead of re-importing rows as-is
 
 **Example workflow:**
 ```bash
@@ -482,7 +490,7 @@ A:
 - `parent_child`: Each section gets a large parent chunk plus small children. Retrieval hits children; serve can expand to the parent.
 - `semantic`: *Intended* to split where adjacent-sentence similarity drops. **Not wired in Phase 1 today** (`pipeline` never passes `semantic_embedder`), so choosing `semantic` behaves like packed sentence windows.
 
-Start with `structure` (Phase 1 config default). `run_pdfs` defaults to `parent_child`.
+Start with `parent_child` (Phase 1 config default). `run_pdfs` also defaults to `parent_child`.
 
 **Q: How do I evaluate my system?**  
 A: Phase 3 includes `eval_ragas.py`, which computes context precision/recall/faithfulness over a golden Q&A set. Bootstrap with 50–100 expert-curated pairs, then run before/after fine-tuning to measure improvement.

@@ -13,7 +13,9 @@ The file sink writes exclusive JSONL (or Parquet) splits under
     tables.jsonl    extra.block_type == table (omitted if empty)
     figures.jsonl   extra.block_type == figure (omitted if empty)
 
-Postgres still upserts every chunk. Records use the shared ``Chunk`` schema.
+Postgres uses ``replace_source`` (delete + upsert in one transaction).
+Records use the shared ``Chunk`` schema. Duplicate file sha256s are skipped
+and recorded on the canonical source as ``meta.also_in``.
 """
 
 from __future__ import annotations
@@ -22,17 +24,24 @@ import argparse
 import hashlib
 import logging
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
+from common.quality import annotate_chunks
 from common.schema import Chunk, write_jsonl, write_parquet
 from common.tokenizer import (
     DEFAULT_MAX_TOKENS,
     DEFAULT_TARGET_TOKENS,
     effective_max_tokens,
 )
-from .extract import extract_document
+from .extract import (
+    DEFAULT_FORCE_OCR,
+    DEFAULT_OCR_LANGUAGES,
+    _file_sha256,
+    extract_document,
+    should_force_ocr,
+)
 from .chunk import chunk_document, reindex_chunks
 
 logging.basicConfig(level=logging.INFO,
@@ -46,7 +55,7 @@ class Phase1Config:
     out_dir: str = "data/processed"
     out_format: str = "jsonl"          # "jsonl" | "parquet"
     backend: str = "pymupdf4llm"       # pymupdf4llm | docling | pymupdf
-    strategy: str = "structure"        # structure | parent_child | semantic
+    strategy: str = "parent_child"     # parent_child | structure | semantic
     target_tokens: int = DEFAULT_TARGET_TOKENS
     overlap_pct: float = 0.15
     min_tokens: int = 80
@@ -56,9 +65,12 @@ class Phase1Config:
     min_figure_chars: int = 40
     parent_max_tokens: int = 2000
     ocr_enabled: bool = True
+    ocr_languages: str = DEFAULT_OCR_LANGUAGES
+    force_ocr: list = field(default_factory=lambda: list(DEFAULT_FORCE_OCR))
     extract_tables: bool = True  # false = drop tables; true = keep, linearised
     extract_figures: bool = True
     dedup: bool = True
+    quality: dict = field(default_factory=dict)
     # --- scaling ---
     workers: int = 1                   # 0 or <0 => auto (cpu_count-1)
     # --- datastore sink ---
@@ -71,8 +83,13 @@ def _load_config(path: str) -> Phase1Config:
     with open(path) as f:
         raw = yaml.safe_load(f) or {}
     p1 = (raw.get("phase1") or {})
-    return Phase1Config(**{k: v for k, v in p1.items()
-                           if k in Phase1Config.__dataclass_fields__})
+    kwargs = {k: v for k, v in p1.items()
+              if k in Phase1Config.__dataclass_fields__ and v is not None}
+    if "force_ocr" in kwargs and not isinstance(kwargs["force_ocr"], list):
+        kwargs["force_ocr"] = list(kwargs["force_ocr"] or [])
+    if "quality" in kwargs and not isinstance(kwargs["quality"], dict):
+        kwargs["quality"] = {}
+    return Phase1Config(**kwargs)
 
 
 def _dedup(chunks: list[Chunk]) -> list[Chunk]:
@@ -158,16 +175,23 @@ def write_file_sink(
     return folder
 
 
-def _process_one(args) -> tuple[str, str, list[Chunk]]:
-    """Top-level (picklable) worker: one PDF -> (name, relative_stem, chunks)."""
+def _process_one(args) -> tuple[str, str, str, str, list[Chunk]]:
+    """Top-level (picklable) worker: one PDF -> (name, stem, source_id, sha256, chunks)."""
     pdf_str, cfg = args
     pdf = Path(pdf_str)
     src_id = relative_source_id(pdf, Path(cfg.input_dir))
     try:
+        sha = _file_sha256(pdf)
+    except OSError:
+        sha = ""
+    try:
+        force = should_force_ocr(src_id, cfg.force_ocr)
         doc = extract_document(
             pdf, backend=cfg.backend, ocr_enabled=cfg.ocr_enabled,
             extract_tables=cfg.extract_tables, extract_figures=cfg.extract_figures,
             source_id=src_id,
+            ocr_languages=cfg.ocr_languages,
+            force_ocr=force,
         )
         chunks = chunk_document(
             doc, strategy=cfg.strategy,
@@ -182,10 +206,11 @@ def _process_one(args) -> tuple[str, str, list[Chunk]]:
         if cfg.dedup:
             chunks = _dedup(chunks)
         chunks = reindex_chunks(chunks)
-        return pdf.name, relative_stem(src_id), chunks
+        chunks = annotate_chunks(chunks, quality_cfg=cfg.quality)
+        return pdf.name, relative_stem(src_id), src_id, sha, chunks
     except Exception as e:
         log.exception("  FAILED %s: %s", pdf.name, e)
-        return pdf.name, relative_stem(src_id), []
+        return pdf.name, relative_stem(src_id), src_id, sha, []
 
 
 def run(cfg: Phase1Config, pdfs: Optional[list] = None) -> list[Chunk]:
@@ -207,15 +232,43 @@ def run(cfg: Phase1Config, pdfs: Optional[list] = None) -> list[Chunk]:
         store = open_chunk_store(cfg.datastore_config)
         store.ensure_schema()
 
+    pending: list[Path] = []
+    seen_sha: dict[str, str] = {}
+    for pdf in pdfs:
+        src_id = relative_source_id(pdf, in_dir)
+        try:
+            sha = _file_sha256(pdf)
+        except OSError:
+            sha = ""
+        if sha and sha in seen_sha:
+            log.info("skip %s: sha256 already queued as %s", src_id, seen_sha[sha])
+            if store:
+                store.record_source_alias(seen_sha[sha], src_id)
+            continue
+        if sha and store:
+            canon = store.find_canonical_source_by_sha256(sha)
+            if canon and canon != src_id:
+                log.info("skip %s: sha256 already ingested as %s", src_id, canon)
+                store.record_source_alias(canon, src_id)
+                continue
+        if sha:
+            seen_sha[sha] = src_id
+        pending.append(pdf)
+    pdfs = pending
+
     all_chunks: list[Chunk] = []
     upserted = 0
 
-    def handle(name: str, stem: str, chunks: list[Chunk]) -> None:
+    def handle(name: str, stem: str, source_id: str, sha256: str,
+               chunks: list[Chunk]) -> None:
         nonlocal upserted
         if cfg.sink == "postgres":
-            upserted += store.upsert(chunks)
+            if not chunks:
+                log.info("  %s -> 0 chunks (left existing rows untouched)", name)
+                return
+            upserted += store.replace_source(source_id, chunks)
             try:
-                counts = store.chunk_index_counts(name)
+                counts = store.chunk_index_counts(source_id)
             except Exception:
                 counts = []
             log.info("  %s -> %d chunks -> datastore chunk_index=%s",
@@ -231,8 +284,9 @@ def run(cfg: Phase1Config, pdfs: Optional[list] = None) -> list[Chunk]:
     if workers > 1:
         import multiprocessing as mp
         with mp.get_context("spawn").Pool(workers) as pool:
-            for name, stem, chunks in pool.imap_unordered(_process_one, tasks):
-                handle(name, stem, chunks)
+            for name, stem, source_id, sha256, chunks in pool.imap_unordered(
+                    _process_one, tasks):
+                handle(name, stem, source_id, sha256, chunks)
     else:
         for t in tasks:
             handle(*_process_one(t))
@@ -283,6 +337,9 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--min-table-chars", dest="min_table_chars", type=int)
     ap.add_argument("--min-figure-chars", dest="min_figure_chars", type=int)
     ap.add_argument("--no-ocr", dest="ocr_enabled", action="store_false", default=None)
+    ap.add_argument("--ocr-languages", dest="ocr_languages",
+                    help="Tesseract languages for ocrmypdf/pytesseract "
+                         "(default eng+hin+san)")
     ap.add_argument("--no-tables", dest="extract_tables", action="store_false", default=None)
     ap.add_argument("--no-figures", dest="extract_figures", action="store_false", default=None)
     ap.add_argument("--workers", type=int, help="parallel worker processes (0=auto)")

@@ -65,10 +65,11 @@ tolerates common abbreviations (`Fig.`, `e.g.`, `Dr.`, ...). Chunking
 (`extra.block_type`); tables are linearised and row-split, figures use the
 same token cap. Three strategies:
 
-- **`structure`** *(default)* — heading-grouped, sentence-packed windows.
-- **`parent_child`** — additionally emits one large *parent* chunk per section
-  (capped at `parent_max_tokens`). Retrieval later matches small, precise
-  *children* but can expand to the parent for full context via `parent_id`.
+- **`parent_child`** *(default)* — emits one large *parent* chunk per section
+  (capped at `parent_max_tokens`) plus children. Every PDF child has a
+  `parent_id`; parents are stored but not embedded. Retrieval expands via
+  `parent_id`.
+- **`structure`** — heading-grouped, sentence-packed windows (no parents).
 - **`semantic`** — splits where adjacent-sentence embedding similarity drops into
   the lowest quartile. Phase 1 **does not pass an embedder**, so this falls back
   to the same packed windows as `structure`.
@@ -148,7 +149,9 @@ phase1:
   out_dir:   "data/processed"   # per-PDF folder: {stem}/chunks.jsonl (+ parents/tables/figures)
   out_format: "jsonl"        # jsonl | parquet
   backend:   "pymupdf4llm"   # pymupdf4llm | docling | pymupdf
-  strategy:  "structure"     # structure | parent_child | semantic
+  strategy:  "parent_child"  # parent_child | structure | semantic
+  ocr_languages: "eng+hin+san"
+  force_ocr: ["*BPHS*Sharma*", "*J_KP*4*", "*J_KP*5*"]
   target_tokens: 400         # aim inside 300-500 for retrieval precision
   overlap_pct: 0.15          # 12-15%
   min_tokens: 80             # merge trailing slivers smaller than this
@@ -282,10 +285,10 @@ brew install tesseract ghostscript
 
 **On Ubuntu/Debian:**
 ```bash
-sudo apt-get install tesseract-ocr ghostscript
+sudo apt-get install tesseract-ocr tesseract-ocr-eng tesseract-ocr-hin tesseract-ocr-san ghostscript
 ```
 
-**On Windows:** Download from [Tesseract GitHub releases](https://github.com/UB-Mannheim/tesseract/wiki) and [Ghostscript website](https://www.ghostscript.com/download/gsdnld.html), then add to PATH.
+**On Windows:** Download the [UB Mannheim Tesseract installer](https://github.com/UB-Mannheim/tesseract/wiki) and [Ghostscript](https://www.ghostscript.com/download/gsdnld.html), then add both to PATH. In the Tesseract installer enable Additional language data for **English**, **Hindi**, and **Sanskrit** (or copy `eng.traineddata`, `hin.traineddata`, `san.traineddata` into `tessdata`). If `tesseract-ocr-san` is not packaged on your Linux distro, drop `san.traineddata` from [tessdata](https://github.com/tesseract-ocr/tessdata) into `TESSDATA_PREFIX`.
 
 ### Tables come out as `|Col1|` pipe dumps
 → that path is gone. Tables are linearised (`Planet: Saturn; Degree: 10`). Set `extract_tables: false` to drop them. For very complex layouts, switch `backend: docling` (still linearised, still typed).

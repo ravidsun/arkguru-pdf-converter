@@ -100,7 +100,7 @@ Omit `--sink postgres` to write JSONL under `data/processed/` instead.
 The Cloud `install` script matches the **offline** local bootstrap:
 
 - `arkguru-common` (schema, tokenizer, chunking, datastore/`search_chunks`, worker, Python RRF for file mode) + pytest + **postgres extra** (`psycopg`, `pgvector`)
-- Phase 1: pymupdf / pymupdf4llm, tiktoken, reportlab (sample PDF), `psycopg` / `pgvector` for `--sink postgres`, **OCR** (`ocrmypdf`, `pytesseract`, `pillow`, plus system `tesseract-ocr` / `ghostscript` when `apt-get` is available)
+- Phase 1: pymupdf / pymupdf4llm, tiktoken, reportlab (sample PDF), `psycopg` / `pgvector` for `--sink postgres`, **OCR** (`ocrmypdf`, `pytesseract`, `pillow`, plus system `tesseract-ocr` / `tesseract-ocr-eng` / `tesseract-ocr-hin` / `tesseract-ocr-san` / `ghostscript` when `apt-get` is available)
 - Phase 2: httpx, trafilatura, datasketch, …
 - Phase 3 core only: numpy + rank-bm25
 
