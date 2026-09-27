@@ -17,7 +17,8 @@ Implements three complementary strategies (selectable via config):
                      available; otherwise falls back to fixed sentence windows.
 
 All strategies honor `target_tokens` (default 400), a hard `max_tokens` cap
-(default 512, bge-m3), and `overlap_pct` (10-15%). Tables are linearised
+(default 510 body tokens: 512 minus XLM-R specials), and `overlap_pct`
+(10-15%). Tables are linearised
 ``header: value`` rows and split by row; they are never left as pipe dumps.
 """
 
@@ -41,6 +42,7 @@ from common.tokenizer import (
     DEFAULT_MAX_TOKENS,
     DEFAULT_TARGET_TOKENS,
     count_tokens,
+    effective_max_tokens,
     split_to_max_tokens,
     truncate_to_tokens,
 )
@@ -244,7 +246,7 @@ def chunk_document(
     keep_tables: bool = True,
 ) -> list[Chunk]:
     overlap_tokens = max(1, int(target_tokens * overlap_pct))
-    cap = max(1, max_tokens)
+    cap = effective_max_tokens(max_tokens)
     grouped = _group_by_section(doc.blocks)
     if merge_small_sections:
         sections = _merge_small_sections(grouped, min_chunk_chars)
@@ -417,7 +419,7 @@ def _semantic_windows(sents, target_tokens, overlap_tokens, embedder, max_tokens
     else:
         thresh = 0.0
 
-    cap = max(1, max_tokens)
+    cap = effective_max_tokens(max_tokens)
     target = min(target_tokens, cap)
     windows: list[tuple[str, int]] = []
     cur: list[str] = []

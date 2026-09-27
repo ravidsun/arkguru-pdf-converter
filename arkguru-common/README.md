@@ -16,7 +16,7 @@ top-level module.
 | Module | Purpose |
 |---|---|
 | `common.schema` | The shared `Chunk` dataclass + JSONL/Parquet I/O (`read_jsonl`, `write_jsonl`, `read_parquet`, `write_parquet`). |
-| `common.tokenizer` | `count_tokens` / `truncate_to_tokens` / `split_to_max_tokens`. Default counter is tiktoken `cl100k_base` (not equivalent to bge-m3/XLM-R). Set `ARKGURU_TOKENIZER=BAAI/bge-m3` to use the embedder tokenizer when `transformers` is installed. Hard cap default is 512. |
+| `common.tokenizer` | `count_tokens` / `truncate_to_tokens` / `split_to_max_tokens` / `resolve_tokenizer`. Default: `BAAI/bge-m3` tokenizer files via `transformers` (`local_files_only`, never the model). Falls back to tiktoken `cl100k_base` with a one-time warning. `ARKGURU_TOKENIZER` overrides (`tiktoken` for tests/CI). Body cap default is **510** (512 minus XLM-R specials). |
 | `common.chunking` | `split_paragraphs` / `split_sentences` / `split_for_packing` / `pack_windows`. Sentences split on `.!?`, danda `।`/`॥`, and newlines. `pack_windows` never exceeds `max_tokens`. |
 | `common.text` | `clean_text` — strip inline HTML (`<mark>`, `<u>`, `<sup>`, `<br>`, …), unwrap `**`/`_` emphasis, NFKC, collapse whitespace. Applied to PDF and web text. |
 | `common.tables` | Linearise tables as `header: value`, drop `ColN` placeholders, strip markdown pipe tables from prose, pack long tables by row. |
@@ -40,7 +40,7 @@ top-level module.
 
 ```bash
 pip install -e .            # core (pyyaml, tiktoken)
-# optional: ARKGURU_TOKENIZER=BAAI/bge-m3 requires transformers
+pip install -e ".[xlm]"     # transformers; uses cached BAAI/bge-m3 tokenizer files
 pip install -e ".[parquet]" # + pyarrow for Parquet interchange
 pip install -e ".[postgres]"# + psycopg/pgvector for the DB datastore
 pip install -e ".[test]"    # + pytest

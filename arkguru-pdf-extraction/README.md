@@ -56,7 +56,7 @@ Prose blocks are grouped under their nearest heading into *sections*. Tiny
 sections that share a heading chain are merged; leftover heading-only and
 sub-`min_chunk_chars` bodies are dropped. Each section is packed into
 windows of ~`target_tokens` (default **400**) with a hard `max_tokens` cap
-(default **512**, bge-m3 `max_seq_length`) and `overlap_pct` overlap
+(default **510** body tokens: bge-m3 512 minus XLM-R specials) and `overlap_pct` overlap
 (default **15%**). A `min_tokens` floor (default 80) merges any tiny
 trailing window into its predecessor unless that would exceed the cap.
 Sentence splitting uses `.!?`, danda `।`/`॥`, and newlines, and still
@@ -73,9 +73,12 @@ same token cap. Three strategies:
   the lowest quartile. Phase 1 **does not pass an embedder**, so this falls back
   to the same packed windows as `structure`.
 
-Token sizing uses tiktoken `cl100k_base` unless `ARKGURU_TOKENIZER` points at
-a Hugging Face id (set `BAAI/bge-m3` to match the embedder). tiktoken is
-**not** the XLM-R tokenizer; it is a consistent proxy with a hard 512 cap.
+Token sizing prefers the `BAAI/bge-m3` tokenizer when `transformers` is
+installed and the tokenizer files are already cached (`local_files_only`;
+never a model download). Otherwise it falls back to tiktoken `cl100k_base`
+and logs a one-time warning — cl100k is **not** XLM-R and can under-count
+Devanagari. Force the proxy with `ARKGURU_TOKENIZER=tiktoken` (tests/CI).
+The body cap is 510 so CLS/SEP still fit in the 512-token window.
 
 **3. Write (`common/schema.py`).**
 Chunks are deduplicated per source PDF (exact-text for children; parents
@@ -149,7 +152,7 @@ phase1:
   target_tokens: 400         # aim inside 300-500 for retrieval precision
   overlap_pct: 0.15          # 12-15%
   min_tokens: 80             # merge trailing slivers smaller than this
-  max_tokens: 512            # hard cap (bge-m3 max_seq_length)
+  max_tokens: 510            # body cap (512 model window minus 2 specials)
   min_chunk_chars: 80        # drop if body minus heading is shorter
   min_table_chars: 40
   min_figure_chars: 40
@@ -252,7 +255,8 @@ the portable interchange format.
 
 ### Core dependencies (always required)
 - **pymupdf4llm** — fast, native-text PDF extraction with built-in Markdown formatting
-- **tiktoken** — lightweight tokenizer for chunk sizing (cl100k_base for GPT models)
+- **tiktoken** — fallback chunk-sizing proxy when the bge-m3 tokenizer is not cached
+- **transformers** *(optional)* — `BAAI/bge-m3` tokenizer files only (`local_files_only`)
 - **pyyaml** — configuration file parsing
 
 ### OCR and figure extraction

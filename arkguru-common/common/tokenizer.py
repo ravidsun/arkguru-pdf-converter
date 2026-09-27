@@ -1,31 +1,65 @@
 """
-Token counting used for chunk sizing.
+Token counting used for chunk sizing against bge-m3 (XLM-R, max 512).
 
-bge-m3 (XLM-R) has ``max_seq_length`` 512. When ``ARKGURU_TOKENIZER`` is set
-to a Hugging Face id (e.g. ``BAAI/bge-m3``) and ``transformers`` is
-installed, that tokenizer is used. Otherwise we keep tiktoken
-``cl100k_base`` — a fast proxy that is **not** equivalent to XLM-R,
-especially on Devanagari. Production ingest that must match the embedder
-should set ``ARKGURU_TOKENIZER=BAAI/bge-m3``.
+Default resolution (``ARKGURU_TOKENIZER`` unset or ``auto``):
+
+1. ``BAAI/bge-m3`` tokenizer files via ``transformers``, ``local_files_only``
+   (tokenizer only — never the embedding model, never a network download).
+2. tiktoken ``cl100k_base``, with a one-time warning that counts can differ
+   from XLM-R (especially Devanagari / diacritics).
+3. A ~4 chars/token heuristic if tiktoken is missing too.
+
+``ARKGURU_TOKENIZER`` overrides: a Hugging Face id, or ``tiktoken`` /
+``cl100k_base`` to force the proxy (tests/CI). Tests should set that or
+use a stub so CI never downloads.
+
+The default *body* cap is the model window minus special tokens
+(CLS/SEP → 510) so the embedder does not truncate.
 """
 from __future__ import annotations
 
+import logging
 import os
 from functools import lru_cache
 
+log = logging.getLogger("common.tokenizer")
+
+DEFAULT_HF_TOKENIZER = "BAAI/bge-m3"
+MODEL_MAX_SEQ_LENGTH = 512
+DEFAULT_SPECIAL_TOKEN_RESERVE = 2
 DEFAULT_TARGET_TOKENS = 400
-DEFAULT_MAX_TOKENS = 512  # bge-m3 max_seq_length
+# Body cap after reserving XLM-R specials. pack_windows still subtracts
+# specials when the caller passes the raw model window (512).
+DEFAULT_MAX_TOKENS = MODEL_MAX_SEQ_LENGTH - DEFAULT_SPECIAL_TOKEN_RESERVE
+
+_TIKTOKEN_ALIASES = frozenset({"tiktoken", "cl100k_base", "proxy"})
+_AUTO_ALIASES = frozenset({"", "auto"})
+
+_fallback_warned = False
 
 
-@lru_cache(maxsize=1)
 def tokenizer_name() -> str:
-    return (os.environ.get("ARKGURU_TOKENIZER") or "tiktoken").strip()
+    return (os.environ.get("ARKGURU_TOKENIZER") or "auto").strip() or "auto"
 
 
-@lru_cache(maxsize=2)
-def _hf_tokenizer(name: str):
+def reset_tokenizer_cache() -> None:
+    """Drop cached backend / HF objects. Used by tests after env changes."""
+    global _fallback_warned
+    _fallback_warned = False
+    resolve_tokenizer.cache_clear()
+    _hf_tokenizer.cache_clear()
+    _tiktoken_encoder.cache_clear()
+
+
+def _load_hf_tokenizer(name: str):
+    """Load tokenizer *files* only. Never downloads, never loads the model."""
     from transformers import AutoTokenizer
-    return AutoTokenizer.from_pretrained(name)
+    return AutoTokenizer.from_pretrained(name, local_files_only=True)
+
+
+@lru_cache(maxsize=4)
+def _hf_tokenizer(name: str):
+    return _load_hf_tokenizer(name)
 
 
 @lru_cache(maxsize=1)
@@ -37,27 +71,86 @@ def _tiktoken_encoder():
         return None
 
 
-def _hf_name() -> str | None:
-    name = tokenizer_name()
-    if not name or name.lower() in {"tiktoken", "cl100k_base", "auto", "proxy"}:
-        return None
-    return name
+def _warn_tiktoken_fallback(reason: str) -> None:
+    global _fallback_warned
+    if _fallback_warned:
+        return
+    _fallback_warned = True
+    log.warning(
+        "Chunk sizing fell back to tiktoken cl100k_base (%s). "
+        "cl100k counts differ from BAAI/bge-m3 (XLM-R SentencePiece), "
+        "especially on Devanagari and diacritic-heavy text, so a chunk "
+        "at the tiktoken cap may still be truncated at embed time. "
+        "Install transformers and cache the %s tokenizer files "
+        "(no model download needed). Set ARKGURU_TOKENIZER=tiktoken to "
+        "force the proxy (tests/CI).",
+        reason, DEFAULT_HF_TOKENIZER,
+    )
+
+
+@lru_cache(maxsize=1)
+def resolve_tokenizer() -> tuple[str, str]:
+    """Return ``(backend, name)``.
+
+    ``backend`` is ``hf``, ``tiktoken``, or ``char``.
+    """
+    requested = tokenizer_name()
+    key = requested.lower()
+    if key in _TIKTOKEN_ALIASES:
+        if _tiktoken_encoder() is not None:
+            return "tiktoken", "cl100k_base"
+        return "char", "char"
+
+    hf_name = DEFAULT_HF_TOKENIZER if key in _AUTO_ALIASES else requested
+    try:
+        _hf_tokenizer(hf_name)
+        return "hf", hf_name
+    except Exception as exc:
+        if key in _AUTO_ALIASES:
+            _warn_tiktoken_fallback(f"{DEFAULT_HF_TOKENIZER} unavailable: {exc}")
+        else:
+            _warn_tiktoken_fallback(
+                f"ARKGURU_TOKENIZER={requested} unavailable: {exc}"
+            )
+        if _tiktoken_encoder() is not None:
+            return "tiktoken", "cl100k_base"
+        return "char", "char"
+
+
+def special_token_reserve() -> int:
+    """Tokens the embedder adds around the chunk body (CLS/SEP for XLM-R)."""
+    backend, name = resolve_tokenizer()
+    if backend == "hf":
+        try:
+            tok = _hf_tokenizer(name)
+            n = tok.num_special_tokens_to_add(pair=False)
+            return max(0, int(n))
+        except Exception:
+            pass
+    return DEFAULT_SPECIAL_TOKEN_RESERVE
+
+
+def effective_max_tokens(max_tokens: int | None = None) -> int:
+    """Body-token cap. Subtract specials when using the model window (512)."""
+    if max_tokens is None:
+        return max(1, MODEL_MAX_SEQ_LENGTH - special_token_reserve())
+    cap = max(1, int(max_tokens))
+    if cap >= MODEL_MAX_SEQ_LENGTH:
+        return max(1, cap - special_token_reserve())
+    return cap
 
 
 def count_tokens(text: str) -> int:
     if not text:
         return 0
-    hf = _hf_name()
-    if hf:
-        try:
-            tok = _hf_tokenizer(hf)
-            return len(tok.encode(text, add_special_tokens=False))
-        except Exception:
-            pass
-    enc = _tiktoken_encoder()
-    if enc is not None:
-        return len(enc.encode(text))
-    # Fallback heuristic: ~4 chars/token for English prose.
+    backend, name = resolve_tokenizer()
+    if backend == "hf":
+        tok = _hf_tokenizer(name)
+        return len(tok.encode(text, add_special_tokens=False))
+    if backend == "tiktoken":
+        enc = _tiktoken_encoder()
+        if enc is not None:
+            return len(enc.encode(text))
     return max(1, len(text) // 4)
 
 
@@ -77,6 +170,7 @@ def split_to_max_tokens(
 
     Uses the active encoder when available; otherwise a character budget.
     ``overlap_tokens`` steps the window back so adjacent pieces share a tail.
+    ``max_tokens`` is the body cap (already special-reserved by the caller).
     """
     if not text:
         return []
@@ -89,10 +183,10 @@ def split_to_max_tokens(
     overlap = max(0, min(overlap_tokens, max_tokens - 1))
     step = max(1, max_tokens - overlap)
 
-    hf = _hf_name()
-    if hf:
+    backend, name = resolve_tokenizer()
+    if backend == "hf":
         try:
-            tok = _hf_tokenizer(hf)
+            tok = _hf_tokenizer(name)
             ids = tok.encode(text, add_special_tokens=False)
             return _decode_id_windows(ids, max_tokens, step, tok.decode)
         except Exception:

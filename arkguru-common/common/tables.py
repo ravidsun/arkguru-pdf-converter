@@ -17,6 +17,7 @@ from .tokenizer import (
     DEFAULT_MAX_TOKENS,
     DEFAULT_TARGET_TOKENS,
     count_tokens,
+    effective_max_tokens,
     split_to_max_tokens,
 )
 
@@ -203,10 +204,9 @@ def pack_table_windows(
         return []
     header = lines[0] if lines[0].startswith("Columns:") else ""
     data = lines[1:] if header else lines
+    cap = effective_max_tokens(max_tokens)
     if not data:
-        return [header] if header and count_tokens(header) <= max_tokens else []
-
-    cap = max(1, max_tokens)
+        return [header] if header and count_tokens(header) <= cap else []
     target = min(max(1, target_tokens), cap)
     windows: list[str] = []
     i = 0

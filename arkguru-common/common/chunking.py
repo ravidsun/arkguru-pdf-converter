@@ -4,7 +4,8 @@ Phase 2 (web). Living in `common/` keeps each phase repo standalone.
 
 Split order: paragraphs, then sentences (Latin ``.!?``, danda ``।`` / ``॥``,
 and newline boundaries), then a hard token-cap fallback. ``pack_windows``
-never emits a window above ``max_tokens`` (default 512, bge-m3).
+never emits a window above ``max_tokens`` (default 510 body tokens:
+the bge-m3 512 window minus XLM-R specials).
 """
 from __future__ import annotations
 
@@ -14,6 +15,7 @@ from .tokenizer import (
     DEFAULT_MAX_TOKENS,
     DEFAULT_TARGET_TOKENS,
     count_tokens,
+    effective_max_tokens,
     split_to_max_tokens,
 )
 
@@ -87,7 +89,7 @@ def pack_windows(
 
     Returns list of (window_text, overlap_tokens_used).
     """
-    cap = max(1, max_tokens if max_tokens is not None else DEFAULT_MAX_TOKENS)
+    cap = effective_max_tokens(max_tokens)
     target = min(max(1, target_tokens), cap)
     overlap_tokens = max(0, min(overlap_tokens, cap - 1))
 

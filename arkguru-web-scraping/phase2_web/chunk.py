@@ -7,7 +7,7 @@ from urllib.parse import urlparse
 from common.chunking import pack_windows, split_for_packing
 from common.schema import Chunk
 from common.text import body_without_heading, clean_text
-from common.tokenizer import DEFAULT_MAX_TOKENS, count_tokens
+from common.tokenizer import DEFAULT_MAX_TOKENS, count_tokens, effective_max_tokens
 
 
 def domain_of(url: str) -> str:
@@ -31,11 +31,12 @@ def chunk_page(
     if len(body) < min_content_chars:
         return []
     overlap_tokens = max(1, int(target_tokens * overlap_pct))
+    cap = effective_max_tokens(max_tokens)
     units = split_for_packing(body) or [body]
     windows = pack_windows(
         units, target_tokens=target_tokens,
         overlap_tokens=overlap_tokens, min_tokens=min_tokens,
-        max_tokens=max_tokens,
+        max_tokens=cap,
     )
     domain = domain_of(url)
     heading = (title or "").strip() or None

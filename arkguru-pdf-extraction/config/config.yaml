@@ -8,7 +8,7 @@ phase1:
   target_tokens: 400         # smaller windows -> more precise retrieval
   overlap_pct: 0.15
   min_tokens: 80             # merge trailing slivers smaller than this
-  max_tokens: 512            # hard cap (bge-m3 max_seq_length); never exceeded
+  max_tokens: 510            # body cap (bge-m3 512 minus 2 XLM-R specials)
   min_chunk_chars: 80        # drop after merge if body minus heading is shorter
   min_table_chars: 40        # minimum linearised table body
   min_figure_chars: 40       # minimum figure-OCR body

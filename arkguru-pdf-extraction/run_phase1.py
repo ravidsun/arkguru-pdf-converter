@@ -109,7 +109,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--max-tokens",
         dest="max_tokens",
         type=int,
-        help="Hard token cap per chunk (default 512, bge-m3).",
+        help="Body token cap per chunk (default 510 = 512 minus XLM-R specials).",
     )
     parser.add_argument(
         "--min-chunk-chars",

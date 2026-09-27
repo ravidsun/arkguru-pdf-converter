@@ -22,7 +22,7 @@ parquet = ["pyarrow>=16.0"]
 postgres = ["psycopg[binary]>=3.2", "pgvector>=0.3"]
 # Test tooling used by `make test` in the phase repos
 test = ["pytest>=7.0"]
-# Optional: count tokens with BAAI/bge-m3 (ARKGURU_TOKENIZER=BAAI/bge-m3)
+# Optional: BAAI/bge-m3 tokenizer files (auto-used when cached; no download)
 xlm = ["transformers>=4.40"]
 
 [tool.setuptools]
@@ -31,3 +31,6 @@ packages = ["common"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+markers = [
+    "tokenizer_autoresolve: exercise default HF/tiktoken resolution (do not force tiktoken)",
+]

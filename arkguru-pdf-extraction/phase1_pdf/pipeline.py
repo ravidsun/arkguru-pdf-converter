@@ -27,7 +27,11 @@ from pathlib import Path
 from typing import Optional
 
 from common.schema import Chunk, write_jsonl, write_parquet
-from common.tokenizer import DEFAULT_MAX_TOKENS, DEFAULT_TARGET_TOKENS
+from common.tokenizer import (
+    DEFAULT_MAX_TOKENS,
+    DEFAULT_TARGET_TOKENS,
+    effective_max_tokens,
+)
 from .extract import extract_document
 from .chunk import chunk_document, reindex_chunks
 
@@ -252,7 +256,7 @@ def _print_stats(chunks: list[Chunk]) -> None:
     def pct(p): return toks[min(n - 1, int(p * n))] if n else 0
     idxs = [c.chunk_index for c in child]
     missing = sum(1 for i in idxs if i is None)
-    over = sum(1 for t in toks if t > DEFAULT_MAX_TOKENS)
+    over = sum(1 for t in toks if t > effective_max_tokens(DEFAULT_MAX_TOKENS))
     log.info("Stats: %d child chunks | tokens p10=%d p50=%d p90=%d | %d parents "
              "| chunk_index min=%s max=%s nulls=%d | over_cap=%d",
              n, pct(0.1), pct(0.5), pct(0.9),
@@ -274,7 +278,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--overlap-pct", dest="overlap_pct", type=float)
     ap.add_argument("--min-tokens", dest="min_tokens", type=int)
     ap.add_argument("--max-tokens", dest="max_tokens", type=int,
-                    help="hard token cap per chunk (default 512, bge-m3)")
+                    help="body token cap per chunk (default 510 = 512 minus specials)")
     ap.add_argument("--min-chunk-chars", dest="min_chunk_chars", type=int)
     ap.add_argument("--min-table-chars", dest="min_table_chars", type=int)
     ap.add_argument("--min-figure-chars", dest="min_figure_chars", type=int)
