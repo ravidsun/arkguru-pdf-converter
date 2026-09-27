@@ -365,7 +365,8 @@ python -m phase1_pdf.pipeline --init-db
 
 ## Operating notes
 
-- **Tables are auto-managed.** `ensure_schema()` is idempotent on every write path.
+- **Tables are migration-managed.** `ensure_schema()` applies repo-root
+  `migrations/` (refuses `public` unless `allow_public_schema` / `--allow-public`).
 - **Re-embed with a new model:** `TRUNCATE chunk_embeddings;` then re-run
   `phase3_rag.embed_datastore`. If `dim` changes, update `config/datastore.yaml`
   and drop/recreate `chunk_embeddings` (vector width is fixed at create).

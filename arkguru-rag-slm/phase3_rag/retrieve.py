@@ -22,6 +22,7 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 
+from common.phrase import detect_phrase_terms, load_multiword_terms
 from phase3_rag.embedder import (
     DEFAULT_BATCH_SIZE,
     DEFAULT_MAX_SEQ_LENGTH,
@@ -33,9 +34,11 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 log = logging.getLogger("phase3.retrieve")
 
 # datastore search_* return columns, in order:
-# chunk_id, text, section, source_id, page, url, parent_id, chunk_index, title, lang, score
+# chunk_id, text, section, source_id, page, url, parent_id, chunk_index, title, lang,
+# rrf_score, dense_rank, lexical_rank, phrase_rank
 _C = {"chunk_id": 0, "text": 1, "section": 2, "source_id": 3, "page": 4, "url": 5,
-      "parent_id": 6, "chunk_index": 7, "title": 8, "lang": 9, "score": 10}
+      "parent_id": 6, "chunk_index": 7, "title": 8, "lang": 9, "score": 10,
+      "dense_rank": 11, "lexical_rank": 12, "phrase_rank": 13}
 
 
 CONNECT_TIMEOUT_S = 15
@@ -61,6 +64,27 @@ class Hit:
     section: str = ""; source_id: str = ""; page: int | None = None; url: str = ""
     parent_id: str | None = None
     chunk_index: int | None = None
+    dense_rank: int | None = None
+    lexical_rank: int | None = None
+    phrase_rank: int | None = None
+
+
+def _row_rank(row, key: str) -> int | None:
+    idx = _C[key]
+    if idx >= len(row) or row[idx] is None:
+        return None
+    return int(row[idx])
+
+
+def _lexicon_path(cfg: dict) -> Path:
+    packaged = Path(__file__).parent / "golden" / "domain_lexicon.json"
+    rc = cfg.get("retrieval") or {}
+    raw = rc.get("phrase_lexicon") or rc.get("lexicon_path")
+    if raw:
+        p = Path(raw)
+        if p.is_file():
+            return p
+    return packaged
 
 
 class HybridRetriever:
@@ -80,6 +104,10 @@ class HybridRetriever:
         self.store = open_chunk_store(
             cfg.get("datastore_config"),
             dim=self.embedder.dim)
+        try:
+            self._phrase_terms = load_multiword_terms(_lexicon_path(cfg))
+        except OSError:
+            self._phrase_terms = []
         allow = bool((cfg.get("retrieval") or {}).get("allow_model_mismatch"))
         check_stored_embedding_model(
             self.store, self.embedder.label, allow_mismatch=allow)
@@ -98,6 +126,12 @@ class HybridRetriever:
         k_final = rc["top_k_final"] if top_k_final is None else top_k_final
         k_dense = rc["top_k_vector"]
         k_lexical = rc["top_k_bm25"]
+        k_phrase = int(rc.get("top_k_phrase") or k_lexical)
+        # pgvector's default hnsw.ef_search (40) is a hard ceiling on dense
+        # rows. Raise it to at least top_k_vector for this session.
+        store_ef = getattr(self.store, "hnsw_ef_search", None)
+        if store_ef is None or store_ef < k_dense:
+            self.store.hnsw_ef_search = k_dense
         # The dense and lexical legs overlap only partially, so capping the SQL
         # LIMIT at max(k_dense, k_lexical) threw away candidates the fused set
         # had already found. The cross-encoder is the accurate stage, so give it
@@ -109,14 +143,21 @@ class HybridRetriever:
         if rewriter is not None:
             variants = rewriter.rewrite(query)
 
+        phrase_catalog = getattr(self, "_phrase_terms", None) or []
+
         runs = []
         for v in variants:
             qvec = encode_query(self.embedder, v)
+            phrases = detect_phrase_terms(v, phrase_catalog) or None
             runs.append(self.store.search_chunks(
                 v, qvec,
                 k_dense=k_dense,
                 k_lexical=k_lexical,
+                k_phrase=k_phrase,
                 k_final=k_candidates,
+                source_type=rc.get("filter_source_type"),
+                lang=rc.get("filter_lang"),
+                phrase_terms=phrases,
             ))
         # One variant is the common case and must stay byte-identical to before.
         fused = runs[0] if len(runs) == 1 else self._rrf(runs)
@@ -134,6 +175,9 @@ class HybridRetriever:
                 page=r[_C["page"]], url=r[_C["url"]] or "", score=float(rr[i]),
                 parent_id=r[_C["parent_id"]] or None,
                 chunk_index=r[_C["chunk_index"]],
+                dense_rank=_row_rank(r, "dense_rank"),
+                lexical_rank=_row_rank(r, "lexical_rank"),
+                phrase_rank=_row_rank(r, "phrase_rank"),
             ))
         return self._expand_parents(hits)
 
@@ -344,6 +388,9 @@ def expand_hits_with_parents(
                 url=parent.get("url") or h.url,
                 parent_id=pid,
                 chunk_index=parent.get("chunk_index", h.chunk_index),
+                dense_rank=h.dense_rank,
+                lexical_rank=h.lexical_rank,
+                phrase_rank=h.phrase_rank,
             )
         else:
             expanded = h
@@ -410,4 +457,9 @@ if __name__ == "__main__":
         cfg.setdefault("retrieval", {})["allow_model_mismatch"] = True
     r = create_retriever(cfg, a.processed_dir)
     for h in r.search(a.query):
-        print(f"[{h.score:.3f}] {h.source_id} p{h.page} #{h.chunk_index} :: {h.section}\n  {h.text[:160]}...\n")
+        print(
+            f"[{h.score:.3f}] dense_rank={h.dense_rank} "
+            f"lexical_rank={h.lexical_rank} phrase_rank={h.phrase_rank} "
+            f"{h.source_id} p{h.page} #{h.chunk_index} :: {h.section}\n"
+            f"  {h.text[:160]}...\n"
+        )

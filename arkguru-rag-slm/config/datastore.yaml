@@ -18,6 +18,8 @@ datastore:
     chunks_table: chunks             # source-of-truth: text + metadata
     vectors_table: chunk_embeddings  # separate table: vectors only
     dim: 1024                # embedding dimension (bge-m3=1024, e5=1024, MiniLM=384)
+    # schema: v2             # new corpus; leave unset/public only with allow_public_schema
+    # allow_public_schema: false  # required before ensure_schema/migrate --apply on public
     # HNSW search breadth, set per session before each search.
     # pgvector defaults to 40, and that is a hard ceiling on rows the index scan
     # can return: on 109,163 rows, LIMIT 60 gave back only 40 until this was

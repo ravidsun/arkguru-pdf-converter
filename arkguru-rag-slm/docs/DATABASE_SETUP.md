@@ -1,8 +1,9 @@
 # Database Setup — PostgreSQL + pgvector
 
 The pipeline stores data in **two Postgres tables** (`chunks` = text + metadata,
-`chunk_embeddings` = vectors), using the **pgvector** extension. You do **not** write any DDL yourself — `ensure_schema()` in `common/datastore.py`
-creates the tables, indexes, and the `search_chunks()` hybrid retrieve function. All you need to provide is:
+`chunk_embeddings` = vectors), using the **pgvector** extension. Numbered files
+in repo-root `migrations/` plus `python -m common.migrate` / `ensure_schema()`
+create the tables, indexes, and `search_chunks()` v2. All you need to provide is:
 
 1. a running PostgreSQL with the `vector` extension available,
 2. a database + login role,
@@ -17,11 +18,17 @@ Requirements: PostgreSQL 14+ (16 recommended) and pgvector 0.5+.
 
 ## Hybrid retrieve
 
-When `PG_DSN` is set, Phase 3 retrieve is one SQL function, `search_chunks()`,
-created by `ensure_schema()` in `common/datastore.py` (not a hand-written SQL
-file). It fuses HNSW cosine on `chunk_embeddings` with GIN `ts` on `chunks`
-using reciprocal rank fusion (`is_parent = false` on both legs). Python still
+When `PG_DSN` is set, Phase 3 retrieve is one SQL function, `search_chunks()`
+v2 (`migrations/0002_search_chunks_v2.sql`). It fuses HNSW cosine,
+`websearch_to_tsquery`, and `phraseto_tsquery` (multi-word lexicon terms)
+with RRF. Parents and quality-gate failures are excluded. Python still
 embeds the query, reranks, and expands parents. File/npz mode keeps Python RRF.
+
+```powershell
+$env:PG_DSN = "postgresql://rag:change-me@127.0.0.1:5432/rag"
+python -m common.migrate --schema v2 --dry-run
+python -m common.migrate --schema v2 --apply
+```
 
 ---
 
@@ -211,15 +218,17 @@ python -m phase1_pdf.pipeline --init-db     # or: make init-db  /  python run_ph
 
 ## Operating notes
 
-- **Tables are auto-managed.** `ensure_schema()` is idempotent on every write path
-  and installs `search_chunks()` (hybrid retrieve). Do not put that function in a
-  hand-written schema file.
+- **Tables are migration-managed.** `ensure_schema()` applies repo-root
+  `migrations/` and installs `search_chunks()` v2. Dry-run with
+  `python -m common.migrate --schema v2 --dry-run`. `--apply` refuses `public`
+  unless `--allow-public`.
 - **Re-embed with a new model:** `TRUNCATE chunk_embeddings;` (chunk rows in
   `chunks` are untouched), then re-run `phase3_rag.embed_datastore`. If the new
   model's dimension differs, update `dim` in `config/datastore.yaml` first and
   drop/recreate `chunk_embeddings` (the vector column dimension is fixed at
   creation).
-- **Backups:** `pg_dump "$PG_DSN" > backup.sql`.
+- **Backups:** `python -m phase3_rag.backup --once` dumps the whole schema
+  (tables, indexes, `search_chunks`) via `pg_dump --schema=...`.
 - **Sizing:** each embedding is `dim * 4` bytes (bge-m3 1024-d ≈ 4 KB/row) plus
   the HNSW index; chunk text is usually the larger cost. 100k chunks is well
   within a small VPS.

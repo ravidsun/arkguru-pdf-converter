@@ -296,13 +296,14 @@ serve:
 
 ### Hybrid retrieve (`search_chunks`)
 
-When `PG_DSN` is set, Phase 3 retrieve is **one SQL function**, `search_chunks()`, created by `ensure_schema()` in `common/datastore.py` (not a hand-written schema file). It fuses:
+When `PG_DSN` is set, Phase 3 retrieve is **one SQL function**, `search_chunks()` v2, installed from [`migrations/`](migrations/). It fuses:
 
 - **Dense:** HNSW cosine on `chunk_embeddings` (`ORDER BY embedding <=> q LIMIT k_dense`)
-- **Lexical:** GIN `ts` on `chunks` (`ts @@ plainto_tsquery` + `ts_rank`)
-- **RRF:** `1 / (rrf_k + rank)` with `rrf_k=60`, both legs `is_parent = false`
+- **Lexical:** GIN `ts` on `chunks` (`websearch_to_tsquery` + OR-of-lexemes fallback)
+- **Phrase:** `phraseto_tsquery` on multi-word terms from `golden/domain_lexicon.json`
+- **RRF:** `1 / (rrf_k + rank)` with `rrf_k=60`; parents and quality-gate failures excluded
 
-Python still embeds the query, reranks with `BAAI/bge-reranker-base`, and expands parent chunks. File/npz mode (`run_pdfs` / `quickstart`) keeps Python `reciprocal_rank_fusion`. See [docs/DATABASE_SETUP.md](docs/DATABASE_SETUP.md#hybrid-retrieve).
+Python still embeds the query, reranks with `BAAI/bge-reranker-v2-m3`, and expands parent chunks. File/npz mode (`run_pdfs` / `quickstart`) keeps Python `reciprocal_rank_fusion`. See [docs/DATABASE_SETUP.md](docs/DATABASE_SETUP.md#hybrid-retrieve). Preview SQL with `python -m common.migrate --schema v2 --dry-run`.
 
 ---
 

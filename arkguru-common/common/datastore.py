@@ -17,7 +17,7 @@ Why separate:
 Phase flow:
     Phase 1/2  -> upsert()             -> chunks table (vectors table stays empty)
     Phase 3    -> update_embeddings()  -> chunk_embeddings table
-    retrieve   -> search_chunks() (SQL RRF of dense + lexical)
+    retrieve   -> search_chunks() (SQL RRF of dense + websearch + phrase)
                  search_dense()/search_lexical() remain for debugging a single leg
 
 Requires:  pip install "psycopg[binary]" pgvector
@@ -201,127 +201,37 @@ def index_ident(table: str, suffix: str) -> str:
 
 def _search_chunks_ddl(chunks: str, vectors: str,
                        function: str = "search_chunks") -> str:
-    """SQL function: HNSW-safe dense subquery + FTS, fused with RRF.
+    """Render ``search_chunks`` v2 from ``migrations/0002_search_chunks_v2.sql``.
 
     Dense reads *only* ``vectors`` with ``ORDER BY embedding <=> q LIMIT k`` so
     the HNSW index is used. Do not JOIN ``chunks`` before that LIMIT.
     Ranks are 1-based; ``1 / (rrf_k + rank)`` matches Python RRF at rank 0.
 
-    The lexical leg tries ``plainto_tsquery`` first and falls back to an
-    OR-of-lexemes query when that returns fewer than ``k_lexical`` rows.
-    ``plainto_tsquery`` ANDs every term, which a natural-language question
-    almost never satisfies: measured on a 109,163-chunk corpus, "significance
-    of Saturn in the seventh house" matched 1 chunk and a whole golden set of
-    173 questions produced 1 lexical hit in total, leaving RRF fusing a live
-    dense leg with a dead lexical one. The OR form matched 35,228 for the same
-    question, and ``ts_rank`` still orders by how many terms hit, so precision
-    comes from ranking rather than from filtering everything out. ``LIMIT
-    k_lexical`` keeps the wider candidate set free.
+    Three legs, fused with RRF:
 
-    The AND probe is bounded by ``LIMIT k_lexical`` so the fallback test costs a
-    few rows, not a full count. Lexemes are ``quote_literal``-wrapped, so
-    apostrophes and tsquery operators in the user's text cannot break or inject
-    into the query, and a stopword-only question degrades to an empty tsquery
-    that simply matches nothing.
+    * dense — HNSW cosine on rows that have an embedding
+    * lexical — ``websearch_to_tsquery`` first, then an OR-of-lexemes fallback
+      when that returns fewer than ``k_lexical`` rows (natural-language AND
+      almost never hits; measured on 109,163 chunks)
+    * phrase — ``phraseto_tsquery`` on multi-word domain terms (``phrase_terms``)
+
+    Parents and quality-gate failures are excluded on every leg. ``lang`` and
+    ``source_type`` filters are optional. Lexemes are ``quote_literal``-wrapped.
     """
-    return f"""
-CREATE OR REPLACE FUNCTION {function}(
-  query_text      text,
-  query_embedding vector,
-  k_dense         int  DEFAULT 20,
-  k_lexical       int  DEFAULT 20,
-  k_final         int  DEFAULT 6,
-  rrf_k           int  DEFAULT 60,
-  filter_source_type text DEFAULT NULL,
-  filter_source_id   text DEFAULT NULL
-)
-RETURNS TABLE (
-  chunk_id text, text text, section text, source_id text,
-  page int, url text, parent_id text, chunk_index int,
-  title text, lang text,
-  rrf_score float4, dense_rank int, lexical_rank int
-)
-LANGUAGE sql
-STABLE
-AS $search$
-WITH dense AS (
-  SELECT v.chunk_id,
-         ROW_NUMBER() OVER (ORDER BY v.embedding <=> query_embedding)::int AS rnk
-  FROM {vectors} v
-  ORDER BY v.embedding <=> query_embedding
-  LIMIT k_dense
-),
-dense_hits AS (
-  SELECT d.chunk_id, d.rnk
-  FROM dense d
-  JOIN {chunks} c ON c.chunk_id = d.chunk_id
-  WHERE c.is_parent = false
-    AND (filter_source_type IS NULL OR c.source_type = filter_source_type)
-    AND (filter_source_id IS NULL OR c.source_id = filter_source_id)
-),
-lex_and AS (
-  SELECT plainto_tsquery('english', query_text) AS q
-),
-lex_or AS (
-  SELECT to_tsquery('english',
-           array_to_string(
-             ARRAY(SELECT quote_literal(lx)
-                   FROM unnest(tsvector_to_array(
-                          to_tsvector('english', query_text))) AS lx),
-             ' | ')) AS q
-),
-lex_and_n AS (
-  SELECT count(*) AS n FROM (
-    SELECT 1
-    FROM {chunks} c, lex_and
-    WHERE c.ts @@ lex_and.q
-      AND c.is_parent = false
-      AND (filter_source_type IS NULL OR c.source_type = filter_source_type)
-      AND (filter_source_id IS NULL OR c.source_id = filter_source_id)
-    LIMIT k_lexical
-  ) probe
-),
-lex_q AS (
-  SELECT CASE WHEN (SELECT n FROM lex_and_n) >= k_lexical
-              THEN (SELECT q FROM lex_and)
-              ELSE (SELECT q FROM lex_or)
-         END AS q
-),
-lexical AS (
-  SELECT c.chunk_id,
-         ROW_NUMBER() OVER (
-           ORDER BY ts_rank(c.ts, lex_q.q) DESC
-         )::int AS rnk
-  FROM {chunks} c, lex_q
-  WHERE c.ts @@ lex_q.q
-    AND c.is_parent = false
-    AND (filter_source_type IS NULL OR c.source_type = filter_source_type)
-    AND (filter_source_id IS NULL OR c.source_id = filter_source_id)
-  ORDER BY ts_rank(c.ts, lex_q.q) DESC
-  LIMIT k_lexical
-),
-fused AS (
-  SELECT
-    COALESCE(d.chunk_id, l.chunk_id) AS chunk_id,
-    (COALESCE(1.0 / (rrf_k + d.rnk), 0.0)
-     + COALESCE(1.0 / (rrf_k + l.rnk), 0.0)) AS score,
-    d.rnk AS dense_rank,
-    l.rnk AS lexical_rank
-  FROM dense_hits d
-  FULL OUTER JOIN lexical l ON d.chunk_id = l.chunk_id
-)
-SELECT
-  c.chunk_id, c.text, c.section, c.source_id, c.page, c.url,
-  c.parent_id, c.chunk_index, c.title, c.lang,
-  f.score::float4 AS rrf_score,
-  f.dense_rank,
-  f.lexical_rank
-FROM fused f
-JOIN {chunks} c ON c.chunk_id = f.chunk_id
-ORDER BY f.score DESC
-LIMIT k_final;
-$search$;
-"""
+    from .migrate import render_named_migration
+
+    schema = "public"
+    fn_name = function
+    if "." in function:
+        schema, fn_name = function.split(".", 1)
+    return render_named_migration(
+        "0002_search_chunks_v2.sql",
+        schema=schema,
+        chunks_table=chunks.split(".")[-1],
+        vectors_table=vectors.split(".")[-1],
+        function_name=fn_name,
+        extra={"chunks": chunks, "vectors": vectors, "function": function},
+    )
 
 
 _QUALITY_EMBED_OK = (
@@ -382,7 +292,8 @@ class ChunkStore:
     def __init__(self, dsn: Optional[str] = None, table: str = "chunks",
                  vectors_table: str = "chunk_embeddings", dim: int = 1024,
                  dsn_env: str = "PG_DSN", hnsw_ef_search=None,
-                 schema: Optional[str] = None):
+                 schema: Optional[str] = None,
+                 allow_public_schema: bool = False):
         self.dsn = dsn or os.environ.get(dsn_env)
         if not self.dsn:
             raise ValueError(
@@ -394,6 +305,7 @@ class ChunkStore:
         self.search_fn = qualify_ident("search_chunks", self.schema)
         self.dim = dim
         self.hnsw_ef_search = _coerce_ef_search(hnsw_ef_search)
+        self.allow_public_schema = bool(allow_public_schema)
 
     @property
     def is_public_schema(self) -> bool:
@@ -422,75 +334,31 @@ class ChunkStore:
         return conn
 
     # -- schema (two tables) ----------------------------------------------
-    def ensure_schema(self) -> None:
-        """Create the two tables + indexes if missing. Idempotent; safe to call on
-        every run. Logs whether each table was created or already present, and
-        raises a clear error if the database is unreachable."""
+    def ensure_schema(self, *, allow_public: Optional[bool] = None) -> None:
+        """Apply numbered migrations via ``common.migrate``. Idempotent.
+
+        Refuses the ``public`` schema unless ``allow_public`` or
+        ``allow_public_schema`` is true (live legacy data). New corpora
+        should use ``schema: v2``.
+        """
+        from .migrate import apply_migrations
+
+        if allow_public is None:
+            allow_public = bool(self.allow_public_schema)
         try:
-            conn = self._connect()
+            applied = apply_migrations(
+                self, allow_public=allow_public, dim=self.dim)
         except RuntimeError:
             raise
         except Exception as e:
             raise RuntimeError(
-                "Could not connect to Postgres for the datastore. Check PG_DSN / "
+                "Could not apply datastore migrations. Check PG_DSN / "
                 "config/datastore.yaml (see docs/DATABASE_SETUP.md). "
                 f"Underlying error: {_redact_secret(str(e), self.dsn)}") from e
-        with conn, conn.cursor() as cur:
-            _ensure_vector_extension(cur)
-            if not self.is_public_schema:
-                cur.execute(
-                    f"CREATE SCHEMA IF NOT EXISTS {_sql_ident(self.schema)}")
-            pre = {}
-            for t in (self.chunks, self.vectors):
-                cur.execute("SELECT to_regclass(%s)", (t,))
-                pre[t] = cur.fetchone()[0] is not None
-            # 1) chunks = source of truth (no embedding column)
-            cur.execute(f"""
-                CREATE TABLE IF NOT EXISTS {self.chunks} (
-                    chunk_id     text PRIMARY KEY,
-                    text         text NOT NULL,
-                    source_type  text,
-                    source_id    text,
-                    chunk_index  int NOT NULL DEFAULT 0,
-                    title        text,
-                    section      text,
-                    page         int,
-                    url          text,
-                    domain       text,
-                    lang         text NOT NULL DEFAULT 'und',
-                    parent_id    text,
-                    is_parent    boolean DEFAULT false,
-                    token_count  int,
-                    overlap_tokens int DEFAULT 0,
-                    content_hash text,
-                    meta         jsonb DEFAULT '{{}}'::jsonb,
-                    ts           tsvector GENERATED ALWAYS AS
-                                 (to_tsvector('english', coalesce(text,''))) STORED,
-                    created_at   timestamptz DEFAULT now()
-                );""")
-            cur.execute(f"CREATE INDEX IF NOT EXISTS {index_ident(self.chunks, '_ts_idx')} "
-                        f"ON {self.chunks} USING gin(ts);")
-            cur.execute(
-                f"CREATE INDEX IF NOT EXISTS {index_ident(self.chunks, '_source_idx')} "
-                f"ON {self.chunks} (source_type, source_id);")
-            _migrate_chunk_columns(cur, self.chunks)
-            # 2) vectors = embeddings only, keyed to chunks
-            cur.execute(f"""
-                CREATE TABLE IF NOT EXISTS {self.vectors} (
-                    chunk_id   text PRIMARY KEY
-                               REFERENCES {self.chunks}(chunk_id) ON DELETE CASCADE,
-                    embedding  vector({self.dim}),
-                    model      text,
-                    created_at timestamptz DEFAULT now()
-                );""")
-            cur.execute(f"CREATE INDEX IF NOT EXISTS {index_ident(self.vectors, '_hnsw_idx')} "
-                        f"ON {self.vectors} USING hnsw (embedding vector_cosine_ops);")
-            cur.execute(_search_chunks_ddl(
-                self.chunks, self.vectors, function=self.search_fn))
-            conn.commit()
-            for t in (self.chunks, self.vectors):
-                log.info("datastore table '%s': %s", t,
-                         "already present" if pre.get(t) else "created")
+        if applied:
+            log.info("datastore schema %s: applied %s", self.schema, applied)
+        else:
+            log.info("datastore schema %s: already present", self.schema)
 
     # -- write chunks (Phases 1/2) ----------------------------------------
     def _prepare_upsert_rows(self, chunks: Iterable[Chunk]
@@ -894,26 +762,30 @@ class ChunkStore:
         *,
         k_dense: int = 20,
         k_lexical: int = 20,
+        k_phrase: int = 20,
         k_final: int = 6,
         rrf_k: int = 60,
         source_type: Optional[str] = None,
         source_id: Optional[str] = None,
+        lang: Optional[str] = None,
+        phrase_terms: Optional[list[str]] = None,
         _retried: bool = False,
     ) -> list[tuple]:
-        """Hybrid retrieve: one round trip through SQL ``search_chunks``.
+        """Hybrid retrieve: one round trip through SQL ``search_chunks`` v2.
 
         Caller embeds ``query_text``. Rerank and parent expansion stay in Python.
-        If the SQL function is missing, ``ensure_schema()`` runs once and the
-        SELECT is retried.
+        ``phrase_terms`` are multi-word domain terms for the ``phraseto_tsquery``
+        leg. If the SQL function is missing, ``ensure_schema()`` runs once and
+        the SELECT is retried.
         """
         vec = "[" + ",".join(str(float(x)) for x in query_embedding) + "]"
         sql = (
             f"SELECT * FROM {self.search_fn}("
-            "%s, %s::vector, %s, %s, %s, %s, %s, %s)"
+            "%s, %s::vector, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
         )
         params = (
             query_text, vec, k_dense, k_lexical, k_final, rrf_k,
-            source_type, source_id,
+            source_type, source_id, k_phrase, lang, phrase_terms,
         )
         try:
             with self._connect() as conn, conn.cursor() as cur:
@@ -924,11 +796,12 @@ class ChunkStore:
             if _retried or not _undefined_function(e):
                 raise
             log.info("search_chunks missing; ensure_schema() then retry")
-            self.ensure_schema()
+            self.ensure_schema(allow_public=self.allow_public_schema)
             return self.search_chunks(
                 query_text, query_embedding,
-                k_dense=k_dense, k_lexical=k_lexical, k_final=k_final,
-                rrf_k=rrf_k, source_type=source_type, source_id=source_id,
+                k_dense=k_dense, k_lexical=k_lexical, k_phrase=k_phrase,
+                k_final=k_final, rrf_k=rrf_k, source_type=source_type,
+                source_id=source_id, lang=lang, phrase_terms=phrase_terms,
                 _retried=True,
             )
 
