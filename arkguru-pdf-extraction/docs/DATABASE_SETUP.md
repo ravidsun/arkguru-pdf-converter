@@ -276,7 +276,7 @@ cd arkguru-pdf-extraction
 python -m phase1_pdf.pipeline --input data/raw_pdfs --sink postgres
 
 cd arkguru-rag-slm
-python -m phase3_rag.embed_datastore --embedder hashing --dim 1024
+python -m phase3_rag.embed_datastore --model BAAI/bge-m3 --dim 1024
 python -m phase3_rag.serve
 ```
 

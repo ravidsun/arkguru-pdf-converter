@@ -89,7 +89,7 @@ Phase 1 fills `chunks` only. Then:
 
 ```bash
 cd /agent/repos/arkguru-pdf-converter/arkguru-rag-slm
-python -m phase3_rag.embed_datastore --embedder hashing --dim 1024
+python -m phase3_rag.embed_datastore --embedder hashing --allow-hashing --dim 1024
 ```
 
 Needs runtime secret `PG_DSN` (Supabase **Session pooler**, port 5432) for `--sink postgres`.
@@ -168,9 +168,9 @@ python -m phase1_pdf.pipeline --config config/config.yaml --init-db
 python -m phase1_pdf.pipeline --input data/raw_pdfs --sink postgres --workers 1 --no-figures
 
 cd ../arkguru-rag-slm
-python -m phase3_rag.embed_datastore --embedder hashing --dim 1024
+python -m phase3_rag.embed_datastore --embedder hashing --allow-hashing --dim 1024
 # or: python -m phase3_rag.run_pdfs --pdfs ../arkguru-pdf-extraction/data/raw_pdfs \
-#        --sink postgres --embedder hashing
+#        --sink postgres --embedder hashing --allow-hashing
 ```
 
 Confirm with SQL (not Table Editor guesswork):

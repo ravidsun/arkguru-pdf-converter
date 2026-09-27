@@ -168,7 +168,7 @@ Two options:
   directly in the Postgres + pgvector **`chunks`** table. Phase 1 does **not**
   write `chunk_embeddings`. Phase 3 fills vectors in place:
 
-  `python -m phase3_rag.embed_datastore --embedder hashing --dim 1024`
+  `python -m phase3_rag.embed_datastore --model BAAI/bge-m3 --dim 1024`
 
   Look at `chunks.chunk_index` (0-based), not the empty embeddings table. See
   *Scaling & datastore* below.

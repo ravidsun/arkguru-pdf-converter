@@ -150,9 +150,10 @@ Copy the string from the project dashboard: **Connect → Session pooler**. Stor
 **Two tables:** Phase 1 `--sink postgres` fills **`chunks`** (`chunk_index` is 0-based on that table). It does **not** insert into **`chunk_embeddings`**. Fill vectors in Phase 3:
 
 ```bash
-python -m phase3_rag.embed_datastore --embedder hashing --dim 1024
+python -m phase3_rag.embed_datastore --model BAAI/bge-m3 --dim 1024
 # or: make embed-db
-# or: python -m phase3_rag.index --embed-only --embedder hashing
+# or: python -m phase3_rag.index --embed-only
+# hashing (tests/dev only): add --embedder hashing --allow-hashing
 ```
 
 In the Table Editor, inspect `chunks.chunk_index` (0, 1, 2, …). Opening `chunk_embeddings` will not show `chunk_index`. A `0` in `chunk_index` can look blank in the editor — confirm with SQL:

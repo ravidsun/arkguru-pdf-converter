@@ -290,7 +290,8 @@ cd arkguru-web-scraping
 python -m phase2_web.pipeline --config config/config.yaml --sink postgres
 
 cd arkguru-rag-slm
-python -m phase3_rag.embed_datastore --embedder hashing --dim 1024
+python -m phase3_rag.embed_datastore --model BAAI/bge-m3 --dim 1024
+# Re-embed an existing schema (resumable): add --schema public --reembed --device cuda
 python -m phase3_rag.serve
 ```
 

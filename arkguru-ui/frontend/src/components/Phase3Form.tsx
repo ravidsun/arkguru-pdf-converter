@@ -62,8 +62,8 @@ export function Phase3Form({
             value={value.embedder}
             onChange={(e) => set("embedder", e.target.value as Phase3State["embedder"])}
           >
-            <option value="hashing">hashing (smoke, no download)</option>
-            <option value="sentence_transformer">sentence_transformer (prod)</option>
+            <option value="sentence_transformer">sentence_transformer (prod, default)</option>
+            <option value="hashing">hashing (tests/dev only)</option>
           </select>
         </div>
         <div className="field wide">

@@ -91,9 +91,18 @@ def main():
     ap.add_argument("--config", default="config/config.yaml")
     ap.add_argument("--processed-dir", default="data/processed",
                     help="fallback JSONL directory if Postgres is unavailable")
+    ap.add_argument("--device", default=None,
+                    help="auto|cpu|cuda (overrides config embedding_device)")
+    ap.add_argument("--allow-model-mismatch", action="store_true",
+                    help="Warn instead of failing when stored embeddings.model "
+                         "does not match the query embedder")
     ap.add_argument("--ask", help="answer a single question and exit")
     a = ap.parse_args()
     cfg = yaml.safe_load(open(a.config))["phase3"]
+    if a.device:
+        cfg["embedding_device"] = a.device
+    if a.allow_model_mismatch:
+        cfg.setdefault("retrieval", {})["allow_model_mismatch"] = True
     retr = create_retriever(cfg, a.processed_dir)
     model = cfg["serve"]["model_tag"]
     cx = cfg["serve"]["ctx"]

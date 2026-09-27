@@ -161,9 +161,12 @@ def main(argv=None) -> int:
 
     if args.sink == "postgres":
         print("[wizard] postgres path: python -m phase3_rag.embed_datastore", flush=True)
-        _run([py, "-m", "phase3_rag.embed_datastore",
+        embed_cmd = [py, "-m", "phase3_rag.embed_datastore",
               "--embedder", args.embedder, "--model", args.model_name,
-              "--dim", str(args.dim)])
+              "--dim", str(args.dim)]
+        if args.embedder == "hashing":
+            embed_cmd.append("--allow-hashing")
+        _run(embed_cmd)
         return 0
 
     if not args.input:
@@ -205,7 +208,7 @@ def chat(layout: Layout, req: ChatRequest) -> dict[str, Any]:
         sys.path.insert(0, str(layout.common))
 
     sink = req.sink or SESSION.sink or "file"
-    embedder = req.embedder or SESSION.embedder or "hashing"
+    embedder = req.embedder or SESSION.embedder or "sentence_transformer"
     store_path = Path(req.store or SESSION.store or default_store(layout))
     ollama = _ollama_up()
     model = req.model if (req.model and ollama) else None
@@ -263,7 +266,7 @@ def _chat_postgres(
     if not os.environ.get("PG_DSN"):
         raise RuntimeError("PG_DSN is not set")
     from common.datastore_config import open_chunk_store
-    from phase3_rag.embedder import Embedder
+    from phase3_rag.embedder import Embedder, check_stored_embedding_model
     from phase3_rag import quickstart
 
     # Column order matches phase3_rag.run_pdfs._HIT (common.datastore search_*).
@@ -282,6 +285,7 @@ def _chat_postgres(
     }
     emb = Embedder(backend=embedder, dim=dim)
     store = open_chunk_store(dim=emb.dim)
+    check_stored_embedding_model(store, emb.label)
     qvec = emb.encode([question])[0].tolist()
     rows = store.search_dense(qvec, k=top_k)
     hits: list[dict[str, Any]] = []

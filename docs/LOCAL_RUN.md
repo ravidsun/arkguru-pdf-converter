@@ -182,10 +182,11 @@ python -m phase1_pdf.pipeline --init-db
 python -m phase1_pdf.pipeline --input data/raw_pdfs --sink postgres --workers 1
 
 cd ../arkguru-rag-slm
-python -m phase3_rag.embed_datastore --embedder hashing --dim 1024
+python -m phase3_rag.embed_datastore --model BAAI/bge-m3 --dim 1024
 # equivalent one-liner:
 # python -m phase3_rag.run_pdfs --pdfs ../arkguru-pdf-extraction/data/raw_pdfs \
-#     --sink postgres --embedder hashing
+#     --sink postgres
+# hashing (tests/dev only): --embedder hashing --allow-hashing
 ```
 
 ```sql
@@ -239,11 +240,9 @@ python -m phase2_web.pipeline --config config/config.yaml --sink postgres
 
 ```bash
 cd ../arkguru-rag-slm
-python -m phase3_rag.embed_datastore --embedder hashing --dim 1024   # Cloud-safe
-# NUC:
-python -m phase3_rag.embed_datastore --embedder sentence_transformer \
-    --model BAAI/bge-m3 --dim 1024
-# or: make index / python -m phase3_rag.index --embed-only --embedder hashing
+python -m phase3_rag.embed_datastore --model BAAI/bge-m3 --dim 1024
+# hashing (tests/dev only): --embedder hashing --allow-hashing
+# or: make index / python -m phase3_rag.index --embed-only
 # JSONL corpus → Postgres (not the local .npz store): make index
 ollama serve &
 python -m phase3_rag.serve

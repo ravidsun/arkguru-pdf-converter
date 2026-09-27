@@ -30,8 +30,8 @@ orchestrator:
 
     - name: index_embeddings
       cwd: "."
-      # hashing is Cloud-safe (no sentence-transformers). NUC daemons can
-      # override: python -m phase3_rag.worker --embedder sentence_transformer
-      command: "python -m phase3_rag.worker --once --embedder hashing"
+      # Default worker embedder is sentence_transformer / BAAI/bge-m3.
+      # Hashing is tests/dev only: add --embedder hashing --allow-hashing.
+      command: "python -m phase3_rag.worker --once"
       # Web crawl is disabled, so depend only on PDF ingest (not crawl_web).
       depends_on: [ingest_pdfs]

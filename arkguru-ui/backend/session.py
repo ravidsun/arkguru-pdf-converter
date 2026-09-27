@@ -13,7 +13,7 @@ from typing import Optional
 @dataclass
 class Session:
     sink: str = "file"
-    embedder: str = "hashing"
+    embedder: str = "sentence_transformer"
     store: Optional[str] = None
     dim: int = 1024
 

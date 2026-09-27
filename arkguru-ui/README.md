@@ -71,7 +71,7 @@ background thread; the UI polls `/api/jobs/{id}` and can stream
 1. Phase 1 → **Generate sample PDF** (runs `scripts/make_sample_pdf.py`)
 2. **Run extraction** with backend `pymupdf4llm`, strategy `structure`, sink `file`
 3. Skip Phase 2 (or crawl a tiny allowlist with `max_pages` ≤ 6)
-4. Phase 3 → embedder **hashing**, sink **file**, fine-tune skipped
+4. Phase 3 → embedder **sentence_transformer** (or **hashing** for smoke), sink **file**, fine-tune skipped
 5. Chat: *What PPE is required before servicing a unit?*
 
 Expected: extractive answer mentioning insulated gloves / lockout-tagout, plus
@@ -102,7 +102,7 @@ python -m phase3_rag.quickstart --add data/processed/corpus.jsonl \
 | Phase 2 | `python -m phase2_web.pipeline --config <temp.yaml>` | Temp YAML carries `same_domain_only` and `backend` (not all of these are CLI flags) |
 | Phase 3 file | `phase3_rag.prepare_dataset` then `phase3_rag.quickstart --add` | Deduped `corpus.jsonl` + local `.npz` store |
 | Phase 3 postgres | `python -m phase3_rag.embed_datastore` | Requires `PG_DSN`; does not invent a new schema |
-| Chat file | imports `quickstart.retrieve` / `answer` | Hashing embedder + extractive fallback if Ollama is down |
+| Chat file | imports `quickstart.retrieve` / `answer` | Default embedder is sentence_transformer; extractive fallback if Ollama is down |
 | Chat postgres | `ChunkStore.search_dense` + `quickstart.answer` | Same `PG_DSN` the CLIs already use |
 | Fine-tune | **not started** | Banner + `make finetune` |
 

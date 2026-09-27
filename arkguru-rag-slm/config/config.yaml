@@ -17,6 +17,9 @@ phase3:
     batch_size: 1
     grad_accum: 16
   embedding_model: "BAAI/bge-m3"
+  embedding_device: auto         # auto | cpu | cuda
+  embedding_batch_size: 16       # sized for bge-m3 / seq 512 / 6 GB GPU
+  embedding_max_seq_length: 512
   # v2-m3 is a drop-in for the same CrossEncoder call and is the stronger
   # multilingual reranker, which matters here because the corpus mixes English
   # with transliterated Sanskrit. Not verifiable on a Cloud Agent: it needs
@@ -30,6 +33,7 @@ phase3:
     top_k_final: 6           # returned after rerank
     use_parent_expansion: true
     rewriter: noop           # noop | lexicon (see phase3_rag/rewrite.py)
+    allow_model_mismatch: false  # true => warn only when stored model != query
   serve:
     backend: "ollama"
     model_tag: "domain-slm"

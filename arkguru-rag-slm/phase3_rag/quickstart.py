@@ -12,24 +12,33 @@ Flow:
               model setup.
 
 Embedder backends:
-  --embedder sentence_transformer   REAL (bge-m3) -- use on your NUC
-  --embedder hashing                offline, no downloads -- for quick tests
+  --embedder sentence_transformer   REAL (bge-m3) -- default
+  --embedder hashing                tests/dev only (must be passed explicitly)
 
 Examples:
-  # ingest two PDFs' chunks and ask one question (offline embedder)
+  # ingest two PDFs' chunks and ask one question (real embedder)
   python -m phase3_rag.quickstart --add data/processed/pdf_chunks.jsonl \
-      --embedder hashing --ask "What PPE is required before servicing a unit?"
+      --ask "What PPE is required before servicing a unit?"
 
   # later: add more, then chat (real embedder + Ollama on your machine)
   python -m phase3_rag.quickstart --add data/processed/new_batch.jsonl \
-      --embedder sentence_transformer --model domain-slm --chat
+      --model domain-slm --chat
+
+  # offline hashing (file store / tests only):
+  python -m phase3_rag.quickstart --add data/processed/pdf_chunks.jsonl \
+      --embedder hashing --ask "What PPE is required before servicing a unit?"
 """
 from __future__ import annotations
 import argparse, json, sys
 from pathlib import Path
 
 from common.schema import read_jsonl, read_parquet
-from phase3_rag.embedder import Embedder
+from phase3_rag.embedder import (
+    DEFAULT_BACKEND,
+    DEFAULT_BATCH_SIZE,
+    DEFAULT_MODEL,
+    Embedder,
+)
 from phase3_rag.faithfulness import apply_gate
 from phase3_rag.vector_store import LocalVectorStore
 
@@ -109,15 +118,19 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description="Phase 3 quickstart RAG demo")
     ap.add_argument("--store", default="data/store/index")
     ap.add_argument("--add", nargs="*", default=[], help="chunk JSONL/Parquet files to ingest")
-    ap.add_argument("--embedder", choices=["sentence_transformer", "hashing"], default="hashing")
-    ap.add_argument("--model-name", default="BAAI/bge-m3")
+    ap.add_argument("--embedder", choices=["sentence_transformer", "hashing"],
+                    default=DEFAULT_BACKEND)
+    ap.add_argument("--model-name", default=DEFAULT_MODEL)
+    ap.add_argument("--device", default="auto")
+    ap.add_argument("--batch", type=int, default=DEFAULT_BATCH_SIZE)
     ap.add_argument("--ask", help="single question")
     ap.add_argument("--chat", action="store_true", help="interactive loop")
     ap.add_argument("--model", help="Ollama model tag for generation (optional)")
     ap.add_argument("--top-k", type=int, default=5)
     a = ap.parse_args(argv)
 
-    emb = Embedder(backend=a.embedder, model_name=a.model_name)
+    emb = Embedder(backend=a.embedder, model_name=a.model_name,
+                   device=a.device, batch_size=a.batch)
     store = LocalVectorStore(a.store)
     if a.add:
         print(f"Ingesting (embedder={a.embedder}, dim={emb.dim}) ...")

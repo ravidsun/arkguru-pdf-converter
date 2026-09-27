@@ -38,7 +38,10 @@ class _FakeCursor:
 
     def execute(self, sql, params=None):
         self.sql = sql
+        self.params = params
         self.sqls.append(sql)
+        self.params_list = getattr(self, "params_list", [])
+        self.params_list.append(params)
         self.rowcount = 0
 
     def executemany(self, sql, rows):
@@ -104,6 +107,42 @@ def test_iter_missing_embeddings_uses_named_cursor(monkeypatch):
         [("id2", "text2"), ("id3", "text3")],
         [("id4", "text4")],
     ]
+    assert "v.chunk_id IS NULL" in cur.sql
+
+
+def test_reembed_requires_model_label():
+    with pytest.raises(ValueError, match="reembed requires"):
+        _store()._embedding_work_clause(model=None, reembed=True)
+
+
+def test_iter_chunks_for_embedding_reembed_filters_by_model(monkeypatch):
+    cur = _FakeCursor(rows=[("id0", "hello")])
+    conn = _FakeConn(cur)
+    monkeypatch.setattr(ChunkStore, "_connect", lambda self: conn)
+    batches = list(_store().iter_chunks_for_embedding(
+        batch=10, model="BAAI/bge-m3", reembed=True))
+    assert batches == [[("id0", "hello")]]
+    assert "v.model IS DISTINCT FROM %s" in cur.sql
+    assert cur.params == ("BAAI/bge-m3",)
+
+
+def test_update_embeddings_requires_model_label(monkeypatch):
+    cur = _FakeCursor()
+    conn = _FakeConn(cur)
+    monkeypatch.setattr(ChunkStore, "_connect", lambda self: conn)
+    with pytest.raises(ValueError, match="model label is required"):
+        _store().update_embeddings(["id0"], [[0.1, 0.2]], model="")
+    assert cur.sql is None
+    n = _store().update_embeddings(["id0"], [[0.1, 0.2]], model="BAAI/bge-m3")
+    assert n == 1
+    assert cur.params == ("id0", [0.1, 0.2], "BAAI/bge-m3")
+
+
+def test_distinct_embedding_models(monkeypatch):
+    cur = _FakeCursor(rows=[(None,), ("BAAI/bge-m3",), ("hashing",)])
+    conn = _FakeConn(cur)
+    monkeypatch.setattr(ChunkStore, "_connect", lambda self: conn)
+    assert _store().distinct_embedding_models() == [None, "BAAI/bge-m3", "hashing"]
 
 
 def test_migrate_chunk_columns_adds_chunk_index_not_null():

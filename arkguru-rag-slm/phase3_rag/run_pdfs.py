@@ -14,24 +14,33 @@ Override the Phase 1 location with --phase1-repo if they live elsewhere.
 
 Examples:
     # offline embedder, just prove retrieval on a couple of PDFs
+    python -m phase3_rag.run_pdfs --pdfs ~/my_pdfs \
+        --ask "What PPE is required before servicing a unit?"
+
+    # offline hashing (tests/dev; file store only, or Postgres with --allow-hashing)
     python -m phase3_rag.run_pdfs --pdfs ~/my_pdfs --embedder hashing \
         --ask "What PPE is required before servicing a unit?"
 
     # on your NUC: real embeddings + Ollama answer, interactive
-    python -m phase3_rag.run_pdfs --pdfs ~/my_pdfs \
-        --embedder sentence_transformer --model domain-slm --chat
+    python -m phase3_rag.run_pdfs --pdfs ~/my_pdfs --model domain-slm --chat
 
     # add more PDFs later -> only new chunks get embedded (idempotent)
-    python -m phase3_rag.run_pdfs --pdfs ~/more_pdfs --embedder hashing
+    python -m phase3_rag.run_pdfs --pdfs ~/more_pdfs
 
     # Postgres handoff: Phase 1 --sink postgres then fill chunk_embeddings
-    python -m phase3_rag.run_pdfs --pdfs ~/my_pdfs --sink postgres --embedder hashing
+    python -m phase3_rag.run_pdfs --pdfs ~/my_pdfs --sink postgres
 """
 from __future__ import annotations
 import argparse, os, subprocess, sys
 from pathlib import Path
 
-from phase3_rag.embedder import Embedder
+from phase3_rag.embedder import (
+    DEFAULT_BACKEND,
+    DEFAULT_BATCH_SIZE,
+    DEFAULT_DIM,
+    DEFAULT_MODEL,
+    Embedder,
+)
 from phase3_rag.vector_store import LocalVectorStore
 from phase3_rag import quickstart
 
@@ -111,8 +120,13 @@ def main(argv=None):
     ap.add_argument("--strategy", default="parent_child",
                     choices=["structure", "parent_child", "semantic"])
     ap.add_argument("--store", default="data/store/index")
-    ap.add_argument("--embedder", choices=["sentence_transformer", "hashing"], default="hashing")
-    ap.add_argument("--model-name", default="BAAI/bge-m3")
+    ap.add_argument("--embedder", choices=["sentence_transformer", "hashing"],
+                    default=DEFAULT_BACKEND)
+    ap.add_argument("--model-name", default=DEFAULT_MODEL)
+    ap.add_argument("--device", default="auto")
+    ap.add_argument("--batch", type=int, default=DEFAULT_BATCH_SIZE)
+    ap.add_argument("--allow-hashing", action="store_true",
+                    help="Required with --embedder hashing --sink postgres")
     ap.add_argument("--ask")
     ap.add_argument("--chat", action="store_true")
     ap.add_argument("--model", help="Ollama model tag for generated answers (optional)")
@@ -120,7 +134,7 @@ def main(argv=None):
     ap.add_argument("--sink", choices=["file", "postgres"], default="file",
                     help="file: local JSONL + LocalVectorStore. "
                          "postgres: Phase 1 --sink postgres then embed_datastore.")
-    ap.add_argument("--dim", type=int, default=1024)
+    ap.add_argument("--dim", type=int, default=DEFAULT_DIM)
     a = ap.parse_args(argv)
 
     pdfs = Path(a.pdfs)
@@ -143,7 +157,8 @@ def main(argv=None):
             f"matching PDFs under {pdfs}."
         )
 
-    emb = Embedder(backend=a.embedder, model_name=a.model_name)
+    emb = Embedder(backend=a.embedder, model_name=a.model_name,
+                   device=a.device, batch_size=a.batch)
     store = LocalVectorStore(a.store)
     print(f"[phase3] ingesting {len(outputs)} file(s) "
           f"(embedder={a.embedder}, dim={emb.dim}) ...")
@@ -169,8 +184,11 @@ def _run_postgres_embed(a) -> int:
 
     print(f"[phase3] filling chunk_embeddings "
           f"(embedder={a.embedder}, dim={a.dim}) ...")
-    embed_main(["--embedder", a.embedder, "--model", a.model_name,
-                "--dim", str(a.dim)])
+    args = ["--embedder", a.embedder, "--model", a.model_name,
+            "--dim", str(a.dim), "--device", a.device, "--batch", str(a.batch)]
+    if a.allow_hashing:
+        args.append("--allow-hashing")
+    embed_main(args)
 
     if a.ask:
         _ask_postgres(a)
@@ -184,7 +202,8 @@ def _run_postgres_embed(a) -> int:
 def _ask_postgres(a) -> None:
     from common.datastore_config import open_chunk_store
 
-    emb = Embedder(backend=a.embedder, model_name=a.model_name, dim=a.dim)
+    emb = Embedder(backend=a.embedder, model_name=a.model_name, dim=a.dim,
+                   device=a.device, batch_size=a.batch)
     store = open_chunk_store(dim=emb.dim)
     qvec = emb.encode([a.ask])[0].tolist()
     rows = store.search_dense(qvec, k=a.top_k)
