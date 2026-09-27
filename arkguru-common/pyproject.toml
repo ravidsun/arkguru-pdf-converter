@@ -33,4 +33,5 @@ testpaths = ["tests"]
 pythonpath = ["."]
 markers = [
     "tokenizer_autoresolve: exercise default HF/tiktoken resolution (do not force tiktoken)",
+    "pgvector: needs a local Postgres 16 + pgvector (skipped without a loopback PG_DSN)",
 ]
