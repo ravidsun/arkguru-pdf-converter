@@ -9,6 +9,8 @@ def test_setup_installs_ocr_system_packages():
     assert "ensure_ocr_packages" in text
     assert "tesseract-ocr" in text
     assert "tesseract-ocr-eng" in text
+    assert "tesseract-ocr-hin" in text
+    assert "tesseract-ocr-san" in text
     assert "ghostscript" in text
 
 

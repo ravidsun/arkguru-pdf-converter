@@ -23,11 +23,13 @@ cd arkguru-pdf-converter
 
 Python 3.9+ is required. On Debian/Ubuntu also install `python3-venv` (and `python3-pip` if needed).
 
-OCR for scanned PDFs is installed by `scripts/setup_dev_env.sh` on Debian/Ubuntu (`tesseract-ocr`, `tesseract-ocr-eng`, `ghostscript`, plus pip `ocrmypdf` / `pytesseract` / `pillow`). On macOS install the system tools yourself:
+OCR for scanned PDFs is installed by `scripts/setup_dev_env.sh` on Debian/Ubuntu (`tesseract-ocr`, `tesseract-ocr-eng`, `tesseract-ocr-hin`, `tesseract-ocr-san`, `ghostscript`, plus pip `ocrmypdf` / `pytesseract` / `pillow`). Hindi and Sanskrit packs are required for BPHS / Devanagari pages (`ocr_languages: eng+hin+san`). On macOS:
 
 ```bash
-brew install tesseract ghostscript
+brew install tesseract ghostscript tesseract-lang
 ```
+
+**Windows Tesseract language packs:** install the [UB Mannheim build](https://github.com/UB-Mannheim/tesseract/wiki). In the installer, enable Additional language data for **English**, **Hindi**, and **Sanskrit**, or copy `eng.traineddata`, `hin.traineddata`, and `san.traineddata` into `C:\Program Files\Tesseract-OCR\tessdata`. Install [Ghostscript](https://www.ghostscript.com/download/gsdnld.html) and add both to `PATH`. If `tesseract-ocr-san` is missing on a Linux distro, download `san.traineddata` from [tessdata](https://github.com/tesseract-ocr/tessdata) into `TESSDATA_PREFIX`.
 
 ## Install
 
@@ -43,7 +45,7 @@ The script is idempotent. It:
 
 1. Creates `.venv` in this repo (override with `ARKGURU_VENV`). On Debian/Ubuntu it installs `python3-venv` if `ensurepip` is missing.
 2. Installs `arkguru-common` from `./arkguru-common` (`import common` works in every phase), including the **`postgres` extra** (`psycopg`, `pgvector`).
-3. Installs Phase 1 requirements plus `reportlab`, Postgres clients, and OCR (`ocrmypdf`, `pytesseract`, `pillow`). On Debian/Ubuntu it also installs system Tesseract and Ghostscript. Phase 2 requirements from `./arkguru-web-scraping`.
+3. Installs Phase 1 requirements plus `reportlab`, Postgres clients, and OCR (`ocrmypdf`, `pytesseract`, `pillow`). On Debian/Ubuntu it also installs system Tesseract (`eng`/`hin`/`san`) and Ghostscript. Phase 2 requirements from `./arkguru-web-scraping`.
 4. Installs the **offline** Phase 3 core (`numpy`, `rank-bm25`) so retrieval works without downloading models.
 
 The virtualenv lives in `arkguru-pdf-converter/.venv`. Activate it before running any phase.

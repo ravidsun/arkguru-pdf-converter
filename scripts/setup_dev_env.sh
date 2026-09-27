@@ -46,16 +46,20 @@ ensure_venv_packages() {
 }
 
 ensure_ocr_packages() {
-  if command -v tesseract >/dev/null 2>&1 && command -v gs >/dev/null 2>&1; then
-    return 0
-  fi
   if ! command -v apt-get >/dev/null 2>&1; then
-    log "WARNING: tesseract/ghostscript missing and apt-get is not available. Scanned-PDF OCR will be skipped."
+    if ! command -v tesseract >/dev/null 2>&1 || ! command -v gs >/dev/null 2>&1; then
+      log "WARNING: tesseract/ghostscript missing and apt-get is not available. Scanned-PDF OCR will be skipped."
+    fi
     return 0
   fi
-  log "Installing tesseract-ocr, tesseract-ocr-eng, and ghostscript for ocrmypdf"
+  # Always (re)install language packs: an existing tesseract-ocr-eng-only
+  # install is what left BPHS/Hindi pages unreadable.
+  log "Installing tesseract-ocr + eng/hin/san language packs and ghostscript"
   sudo apt-get update -qq
-  sudo apt-get install -y tesseract-ocr tesseract-ocr-eng ghostscript
+  sudo apt-get install -y tesseract-ocr tesseract-ocr-eng tesseract-ocr-hin ghostscript
+  if ! sudo apt-get install -y tesseract-ocr-san; then
+    log "WARNING: tesseract-ocr-san is not in this distro. Copy san.traineddata into TESSDATA_PREFIX (see docs/LOCAL_RUN.md)."
+  fi
 }
 
 venv_usable() {
