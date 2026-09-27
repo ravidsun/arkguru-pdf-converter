@@ -27,6 +27,11 @@ from pathlib import Path
 from typing import Optional
 
 from common.schema import Chunk, write_jsonl, write_parquet
+from common.tokenizer import (
+    DEFAULT_MAX_TOKENS,
+    DEFAULT_TARGET_TOKENS,
+    effective_max_tokens,
+)
 from .extract import extract_document
 from .chunk import chunk_document, reindex_chunks
 
@@ -42,12 +47,16 @@ class Phase1Config:
     out_format: str = "jsonl"          # "jsonl" | "parquet"
     backend: str = "pymupdf4llm"       # pymupdf4llm | docling | pymupdf
     strategy: str = "structure"        # structure | parent_child | semantic
-    target_tokens: int = 400
+    target_tokens: int = DEFAULT_TARGET_TOKENS
     overlap_pct: float = 0.15
     min_tokens: int = 80
+    max_tokens: int = DEFAULT_MAX_TOKENS
+    min_chunk_chars: int = 80
+    min_table_chars: int = 40
+    min_figure_chars: int = 40
     parent_max_tokens: int = 2000
     ocr_enabled: bool = True
-    extract_tables: bool = True
+    extract_tables: bool = True  # false = drop tables; true = keep, linearised
     extract_figures: bool = True
     dedup: bool = True
     # --- scaling ---
@@ -164,6 +173,11 @@ def _process_one(args) -> tuple[str, str, list[Chunk]]:
             doc, strategy=cfg.strategy,
             target_tokens=cfg.target_tokens, overlap_pct=cfg.overlap_pct,
             parent_max_tokens=cfg.parent_max_tokens, min_tokens=cfg.min_tokens,
+            max_tokens=cfg.max_tokens,
+            min_chunk_chars=cfg.min_chunk_chars,
+            min_table_chars=cfg.min_table_chars,
+            min_figure_chars=cfg.min_figure_chars,
+            keep_tables=cfg.extract_tables,
         )
         if cfg.dedup:
             chunks = _dedup(chunks)
@@ -242,13 +256,14 @@ def _print_stats(chunks: list[Chunk]) -> None:
     def pct(p): return toks[min(n - 1, int(p * n))] if n else 0
     idxs = [c.chunk_index for c in child]
     missing = sum(1 for i in idxs if i is None)
+    over = sum(1 for t in toks if t > effective_max_tokens(DEFAULT_MAX_TOKENS))
     log.info("Stats: %d child chunks | tokens p10=%d p50=%d p90=%d | %d parents "
-             "| chunk_index min=%s max=%s nulls=%d",
+             "| chunk_index min=%s max=%s nulls=%d | over_cap=%d",
              n, pct(0.1), pct(0.5), pct(0.9),
              sum(1 for c in chunks if c.is_parent),
              min(idxs) if idxs else None,
              max(idxs) if idxs else None,
-             missing)
+             missing, over)
 
 
 def main(argv: Optional[list[str]] = None) -> int:
@@ -262,6 +277,11 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--target-tokens", dest="target_tokens", type=int)
     ap.add_argument("--overlap-pct", dest="overlap_pct", type=float)
     ap.add_argument("--min-tokens", dest="min_tokens", type=int)
+    ap.add_argument("--max-tokens", dest="max_tokens", type=int,
+                    help="body token cap per chunk (default 510 = 512 minus specials)")
+    ap.add_argument("--min-chunk-chars", dest="min_chunk_chars", type=int)
+    ap.add_argument("--min-table-chars", dest="min_table_chars", type=int)
+    ap.add_argument("--min-figure-chars", dest="min_figure_chars", type=int)
     ap.add_argument("--no-ocr", dest="ocr_enabled", action="store_false", default=None)
     ap.add_argument("--no-tables", dest="extract_tables", action="store_false", default=None)
     ap.add_argument("--no-figures", dest="extract_figures", action="store_false", default=None)

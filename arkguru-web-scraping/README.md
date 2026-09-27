@@ -40,3 +40,8 @@ Orchestrator step `crawl_web` stays **disabled** until you turn it on.
 ## Config
 
 See `config/config.yaml` and `config/datastore.yaml` (`schema: web`).
+
+Chunking keys: `target_tokens` (550), `max_tokens` (510 body / 512 window),
+`min_tokens` (80), `min_chunk_chars` (80), `min_content_chars` (200).
+Counts use the cached `BAAI/bge-m3` tokenizer when available; otherwise
+tiktoken (one-time warning). `ARKGURU_TOKENIZER=tiktoken` forces the proxy.

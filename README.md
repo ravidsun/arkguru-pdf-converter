@@ -75,6 +75,9 @@ backend: "pymupdf4llm"    # fast native-text PDFs
 backend: "docling"        # complex tables (slower)
 strategy: "parent_child"  # retrieve small chunks, expand to parent for context
 target_tokens: 400        # ~300–500 tokens per chunk (tuned for retrieval)
+max_tokens: 510           # body cap (bge-m3 512 minus XLM-R specials)
+extract_tables: true      # linearised header:value; false drops tables
+min_chunk_chars: 80       # drop heading-only / tiny leftovers after merge
 ocr_enabled: true         # safe on mixed documents
 extract_figures: true     # OCR text in images
 ```

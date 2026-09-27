@@ -5,6 +5,8 @@ import re
 from html import unescape
 from typing import Optional
 
+from common.text import clean_text
+
 from .fetch import FetchedPage
 
 
@@ -43,4 +45,5 @@ def extract_page(page: FetchedPage) -> tuple[str, Optional[str]]:
         text = ""
     if not text:
         text = _strip_tags(html)
-    return text, title
+    title = clean_text(title) if title else title
+    return clean_text(text), title

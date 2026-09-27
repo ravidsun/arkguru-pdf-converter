@@ -26,22 +26,30 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
+from common.tables import (
+    cells_from_pymupdf_table,
+    is_markdown_separator,
+    is_markdown_table_row,
+    linearize_table,
+    rows_from_markdown,
+)
+from common.text import clean_text
+
 log = logging.getLogger("phase1.extract")
 
 _HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)$")
 
-_EMPH_RE = re.compile(r"[*_`#]+")
 _PLACEHOLDER_TITLES = {"", "(anonymous)", "untitled", "unknown"}
 
 
 def _clean_heading(text: str) -> str:
-    return _EMPH_RE.sub("", text).strip()
+    return clean_text(text)
 
 
 def _norm_title(t):
     if t is None:
         return None
-    t = str(t).strip()
+    t = clean_text(str(t))
     return None if t.lower() in _PLACEHOLDER_TITLES else t
 
 
@@ -69,30 +77,69 @@ class Document:
 # ---------------------------------------------------------------------------
 # Markdown -> Blocks (shared by markdown-producing backends)
 # ---------------------------------------------------------------------------
-def _markdown_to_blocks(md: str, page: Optional[int]) -> list[Block]:
+def _markdown_to_blocks(
+    md: str,
+    page: Optional[int],
+    table_mode: str = "strip",
+) -> list[Block]:
+    """Turn markdown into heading / prose / optional typed table blocks.
+
+    ``table_mode``:
+      - ``strip`` — drop pipe tables (pymupdf4llm path; find_tables is used).
+      - ``promote`` — linearise pipe tables as ``block_type='table'`` (docling).
+    """
+    if table_mode not in ("strip", "promote"):
+        raise ValueError(f"unknown table_mode {table_mode!r}")
+
     blocks: list[Block] = []
     current_heading: Optional[str] = None
     buf: list[str] = []
+    table_buf: list[str] = []
 
-    def flush():
-        if buf:
-            text = "\n".join(buf).strip()
-            if text:
-                blocks.append(Block(text=text, page=page, heading=current_heading))
-            buf.clear()
+    def flush_prose() -> None:
+        if not buf:
+            return
+        text = clean_text("\n".join(buf))
+        buf.clear()
+        if text:
+            blocks.append(Block(text=text, page=page, heading=current_heading))
+
+    def flush_table() -> None:
+        if not table_buf:
+            return
+        raw = "\n".join(table_buf)
+        table_buf.clear()
+        if table_mode != "promote":
+            return
+        rows = rows_from_markdown(raw)
+        text = linearize_table(rows) if rows else ""
+        if text:
+            blocks.append(Block(
+                text=text, page=page, heading=current_heading, block_type="table",
+            ))
 
     for line in md.splitlines():
         m = _HEADING_RE.match(line.strip())
         if m:
-            flush()
+            flush_table()
+            flush_prose()
             level = len(m.group(1))
             htext = _clean_heading(m.group(2))
-            current_heading = htext
-            blocks.append(Block(text=htext, page=page, heading=htext,
-                                heading_level=level, is_heading=True))
-        else:
-            buf.append(line)
-    flush()
+            current_heading = htext or None
+            if htext:
+                blocks.append(Block(
+                    text=htext, page=page, heading=htext,
+                    heading_level=level, is_heading=True,
+                ))
+            continue
+        if is_markdown_table_row(line) or (table_buf and is_markdown_separator(line)):
+            flush_prose()
+            table_buf.append(line)
+            continue
+        flush_table()
+        buf.append(line)
+    flush_table()
+    flush_prose()
     return blocks
 
 
@@ -123,30 +170,8 @@ def _n_nonempty_table_rows(table) -> int | None:
     return n
 
 
-def _table_to_markdown(table) -> Optional[str]:
-    """Best-effort conversion of a pymupdf Table object to a markdown table."""
-    try:
-        return table.to_markdown()
-    except Exception:
-        pass
-    try:
-        rows = table.extract()
-    except Exception:
-        return None
-    if not rows:
-        return None
-    rows = [[("" if c is None else str(c).strip()) for c in row] for row in rows]
-    header, *body = rows
-    lines = [
-        "| " + " | ".join(header) + " |",
-        "| " + " | ".join(["---"] * len(header)) + " |",
-    ]
-    lines.extend("| " + " | ".join(r) + " |" for r in body)
-    return "\n".join(lines)
-
-
 def _extract_tables(page, page_num: int, heading: Optional[str]) -> list["Block"]:
-    """Extract tables on a page as markdown blocks (block_type='table')."""
+    """Extract tables as linearised ``header: value`` blocks (never markdown)."""
     blocks: list[Block] = []
     try:
         finder = page.find_tables()
@@ -156,10 +181,14 @@ def _extract_tables(page, page_num: int, heading: Optional[str]) -> list["Block"
         n_rows = _n_nonempty_table_rows(table)
         if n_rows is not None and n_rows < _MIN_TABLE_ROWS:
             continue
-        md = _table_to_markdown(table)
-        if md and md.strip():
-            blocks.append(Block(text=md.strip(), page=page_num, heading=heading,
-                                block_type="table"))
+        rows = cells_from_pymupdf_table(table)
+        if not rows:
+            continue
+        text = linearize_table(rows)
+        if text:
+            blocks.append(Block(
+                text=text, page=page_num, heading=heading, block_type="table",
+            ))
     return blocks
 
 
@@ -191,7 +220,7 @@ def _extract_figures(pdf, page, page_num: int, heading: Optional[str]) -> list["
         try:
             base = pdf.extract_image(xref)
             im = Image.open(io.BytesIO(base["image"]))
-            text = pytesseract.image_to_string(im).strip()
+            text = clean_text(pytesseract.image_to_string(im))
         except Exception:
             continue
         if _figure_text_is_usable(text):
@@ -263,7 +292,8 @@ def _extract_pymupdf4llm(path: Path, extract_tables: bool = True,
     doc = Document(source_id=path.name)
     for i, pg in enumerate(pages, start=1):
         md = pg.get("text", "") if isinstance(pg, dict) else str(pg)
-        doc.blocks.extend(_markdown_to_blocks(md, page=i))
+        # Always strip inline markdown tables — find_tables is the one path.
+        doc.blocks.extend(_markdown_to_blocks(md, page=i, table_mode="strip"))
     if pages and isinstance(pages[0], dict):
         doc.meta = pages[0].get("metadata", {}) or {}
         doc.title = _norm_title(doc.meta.get("title"))
@@ -280,7 +310,8 @@ def _extract_docling(path: Path, extract_tables: bool = True,
     doc = Document(source_id=path.name)
     # Docling markdown is not per-page; treat whole doc as page None but keep
     # heading structure (which is what chunking actually relies on).
-    doc.blocks = _markdown_to_blocks(md, page=None)
+    table_mode = "promote" if extract_tables else "strip"
+    doc.blocks = _markdown_to_blocks(md, page=None, table_mode=table_mode)
     doc.title = getattr(result.document, "name", None)
     # Docling already models tables/figures natively in its markdown export,
     # so no separate pymupdf augmentation pass is needed here.
@@ -295,7 +326,7 @@ def _extract_pymupdf(path: Path, extract_tables: bool = True,
         doc.meta = pdf.metadata or {}
         doc.title = _norm_title(doc.meta.get("title"))
         for i, page in enumerate(pdf, start=1):
-            text = page.get_text("text").strip()
+            text = clean_text(page.get_text("text"))
             if text:
                 doc.blocks.append(Block(text=text, page=i))
     _augment_with_tables_and_figures(doc, path, extract_tables, extract_figures)
