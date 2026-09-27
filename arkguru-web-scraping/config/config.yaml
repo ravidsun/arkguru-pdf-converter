@@ -37,6 +37,8 @@ phase2:
   target_tokens: 550
   overlap_pct: 0.15
   min_tokens: 80
+  max_tokens: 512            # hard cap (bge-m3 max_seq_length)
+  min_chunk_chars: 80        # drop leftover slivers after packing
   min_content_chars: 200
   dedup: true
   sink: "file"

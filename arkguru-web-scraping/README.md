@@ -40,3 +40,7 @@ Orchestrator step `crawl_web` stays **disabled** until you turn it on.
 ## Config
 
 See `config/config.yaml` and `config/datastore.yaml` (`schema: web`).
+
+Chunking keys: `target_tokens` (550), `max_tokens` (512), `min_tokens` (80),
+`min_chunk_chars` (80), `min_content_chars` (200). Set
+`ARKGURU_TOKENIZER=BAAI/bge-m3` to count with the embedder tokenizer.

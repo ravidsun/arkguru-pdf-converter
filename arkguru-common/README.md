@@ -16,8 +16,10 @@ top-level module.
 | Module | Purpose |
 |---|---|
 | `common.schema` | The shared `Chunk` dataclass + JSONL/Parquet I/O (`read_jsonl`, `write_jsonl`, `read_parquet`, `write_parquet`). |
-| `common.tokenizer` | `count_tokens` / `truncate_to_tokens` (tiktoken `cl100k_base` proxy, with a char-based fallback). |
-| `common.chunking` | `split_sentences` + `pack_windows` — the structure-aware windowing shared by Phase 1 and Phase 2. |
+| `common.tokenizer` | `count_tokens` / `truncate_to_tokens` / `split_to_max_tokens`. Default counter is tiktoken `cl100k_base` (not equivalent to bge-m3/XLM-R). Set `ARKGURU_TOKENIZER=BAAI/bge-m3` to use the embedder tokenizer when `transformers` is installed. Hard cap default is 512. |
+| `common.chunking` | `split_paragraphs` / `split_sentences` / `split_for_packing` / `pack_windows`. Sentences split on `.!?`, danda `।`/`॥`, and newlines. `pack_windows` never exceeds `max_tokens`. |
+| `common.text` | `clean_text` — strip inline HTML (`<mark>`, `<u>`, `<sup>`, `<br>`, …), unwrap `**`/`_` emphasis, NFKC, collapse whitespace. Applied to PDF and web text. |
+| `common.tables` | Linearise tables as `header: value`, drop `ColN` placeholders, strip markdown pipe tables from prose, pack long tables by row. |
 | `common.datastore` | `ChunkStore` — two-table Postgres + pgvector (`chunks` text + `chunk_embeddings` vectors). Host-agnostic `PG_DSN` (Supabase, Neon, RDS, native local, Docker). `search_chunks()` is the hybrid retrieve (SQL RRF). Upsert does not reset `created_at` on conflict. `iter_missing_embeddings` uses a named server-side cursor. |
 | `common.local_pg` | Detect native (5432) vs Docker (5433) local Postgres and keep an injected remote `PG_DSN`. |
 | `common.datastore_config` | `open_chunk_store`, `load_datastore_config`, `resolve_dsn` — config-driven datastore factory (no hardcoded DSNs). |
@@ -38,6 +40,7 @@ top-level module.
 
 ```bash
 pip install -e .            # core (pyyaml, tiktoken)
+# optional: ARKGURU_TOKENIZER=BAAI/bge-m3 requires transformers
 pip install -e ".[parquet]" # + pyarrow for Parquet interchange
 pip install -e ".[postgres]"# + psycopg/pgvector for the DB datastore
 pip install -e ".[test]"    # + pytest

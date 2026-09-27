@@ -36,10 +36,13 @@ Robustness for messy real-world PDFs is layered on top of every backend
   already have a native text layer are left untouched while only the
   scanned/image pages get OCR'd. This makes it safe to run on a report that's
   mostly native text but has a few scanned appendix pages.
-- **Tables.** `pymupdf`'s `page.find_tables()` extracts each table as a
-  markdown block (`block_type: "table"`), attached to the nearest section
-  heading, so rows/columns survive instead of being flattened into garbled
-  prose.
+- **Tables.** One path only. pymupdf4llm's inline markdown pipe tables are
+  stripped from prose (they used to become untyped `|Col1|` dumps).
+  `page.find_tables()` is the structured extractor; rows are linearised as
+  `header: value` (never `Table.to_markdown()`), `ColN` placeholders are
+  dropped, and long tables are split by row with the header repeated.
+  `extract_tables: false` drops tables entirely. Docling promotes its
+  markdown tables the same way (typed + linearised).
 - **Diagrams / charts / graphs.** Embedded images on each page are OCR'd
   (via `pytesseract`, optional) to pull out any text baked into a figure
   (axis labels, legends, callouts); results become `block_type: "figure"`
@@ -49,16 +52,18 @@ A missing optional library degrades gracefully (backend falls back to
 `pymupdf`; table/figure extraction is skipped) rather than crashing the run.
 
 **2. Chunk (`phase1_pdf/chunk.py`).**
-Prose blocks are grouped under their nearest heading into *sections*, then
-packed into windows of ~`target_tokens` (default **400**, tuned smaller than
-before for retrieval precision) with `overlap_pct` overlap (default **15%**).
-A `min_tokens` floor (default 80) merges any tiny trailing window into its
-predecessor instead of shipping a low-context sliver. Sentence splitting
-tolerates common abbreviations (`Fig.`, `e.g.`, `Dr.`, ...) so headings and
-captions aren't chopped mid-thought. Chunking **never crosses a heading
-boundary**, so every chunk is a coherent unit. `table`/`figure` blocks are
-never sentence-packed -- each becomes its own standalone chunk (tagged
-`extra.block_type`) so structured content stays intact. Three strategies:
+Prose blocks are grouped under their nearest heading into *sections*. Tiny
+sections that share a heading chain are merged; leftover heading-only and
+sub-`min_chunk_chars` bodies are dropped. Each section is packed into
+windows of ~`target_tokens` (default **400**) with a hard `max_tokens` cap
+(default **512**, bge-m3 `max_seq_length`) and `overlap_pct` overlap
+(default **15%**). A `min_tokens` floor (default 80) merges any tiny
+trailing window into its predecessor unless that would exceed the cap.
+Sentence splitting uses `.!?`, danda `।`/`॥`, and newlines, and still
+tolerates common abbreviations (`Fig.`, `e.g.`, `Dr.`, ...). Chunking
+**never crosses a heading boundary**. `table`/`figure` blocks are typed
+(`extra.block_type`); tables are linearised and row-split, figures use the
+same token cap. Three strategies:
 
 - **`structure`** *(default)* — heading-grouped, sentence-packed windows.
 - **`parent_child`** — additionally emits one large *parent* chunk per section
@@ -68,9 +73,9 @@ never sentence-packed -- each becomes its own standalone chunk (tagged
   the lowest quartile. Phase 1 **does not pass an embedder**, so this falls back
   to the same packed windows as `structure`.
 
-Token sizing uses a fast proxy tokenizer (`tiktoken cl100k_base`) — good enough
-for "is this ~300–500 tokens?"; Phase 3 does exact accounting with the base
-model's own tokenizer.
+Token sizing uses tiktoken `cl100k_base` unless `ARKGURU_TOKENIZER` points at
+a Hugging Face id (set `BAAI/bge-m3` to match the embedder). tiktoken is
+**not** the XLM-R tokenizer; it is a consistent proxy with a hard 512 cap.
 
 **3. Write (`common/schema.py`).**
 Chunks are deduplicated per source PDF (exact-text for children; parents
@@ -144,9 +149,13 @@ phase1:
   target_tokens: 400         # aim inside 300-500 for retrieval precision
   overlap_pct: 0.15          # 12-15%
   min_tokens: 80             # merge trailing slivers smaller than this
+  max_tokens: 512            # hard cap (bge-m3 max_seq_length)
+  min_chunk_chars: 80        # drop if body minus heading is shorter
+  min_table_chars: 40
+  min_figure_chars: 40
   parent_max_tokens: 2000
   ocr_enabled: true          # OCRs scanned pages; safe on mixed scanned/native PDFs
-  extract_tables: true       # tables -> standalone markdown chunks
+  extract_tables: true       # true = keep, linearised; false = drop tables
   extract_figures: true      # OCR diagrams/charts/graphs (needs pytesseract)
   dedup: true
   # --- scaling ---
@@ -274,8 +283,8 @@ sudo apt-get install tesseract-ocr ghostscript
 
 **On Windows:** Download from [Tesseract GitHub releases](https://github.com/UB-Mannheim/tesseract/wiki) and [Ghostscript website](https://www.ghostscript.com/download/gsdnld.html), then add to PATH.
 
-### Tables come out garbled
-→ they're extracted natively via `page.find_tables()` (`extract_tables: true`); for very complex layouts, switch `backend: docling`. Docling's table-transformer is slower but handles merged cells, rotated text, and multi-column headers far better than pymupdf's basic grid detection.
+### Tables come out as `|Col1|` pipe dumps
+→ that path is gone. Tables are linearised (`Planet: Saturn; Degree: 10`). Set `extract_tables: false` to drop them. For very complex layouts, switch `backend: docling` (still linearised, still typed).
 
 Example switch:
 ```bash

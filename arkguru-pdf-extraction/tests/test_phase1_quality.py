@@ -131,13 +131,19 @@ def test_child_and_table_text_prefixed_with_heading() -> None:
             ),
         ],
     )
-    chunks = chunk_document(doc, strategy="structure", min_tokens=1, target_tokens=400)
+    chunks = chunk_document(
+        doc, strategy="structure", min_tokens=1, target_tokens=400,
+        min_chunk_chars=1, min_table_chars=1,
+    )
     prose = [c for c in chunks if not c.extra.get("block_type")]
     tables = [c for c in chunks if c.extra.get("block_type") == "table"]
     assert prose and prose[0].text.startswith("Safety\n\n")
     assert prose[0].section == "Safety"
     assert tables and tables[0].text.startswith("Safety\n\n")
     assert tables[0].section == "Safety"
+    assert "A: 1" in tables[0].text
+    assert "| A |" not in tables[0].text
+    assert "Col1" not in tables[0].text
 
 
 def test_drop_tables_with_fewer_than_two_rows() -> None:

@@ -17,7 +17,8 @@ _PROSE = ("The tenth house governs profession and karma in the natal chart. "
           "Its lord placed with benefics indicates steady advancement. " * 6)
 
 _KW = dict(strategy="structure", target_tokens=400, overlap_pct=0.15,
-           min_tokens=80, parent_max_tokens=2000)
+           min_tokens=80, parent_max_tokens=2000,
+           min_chunk_chars=1, min_table_chars=1, min_figure_chars=1)
 
 
 def _doc(with_figures: bool, sections: int = 3) -> Document:

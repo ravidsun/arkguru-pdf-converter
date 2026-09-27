@@ -106,6 +106,18 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
              "(overrides config).",
     )
     parser.add_argument(
+        "--max-tokens",
+        dest="max_tokens",
+        type=int,
+        help="Hard token cap per chunk (default 512, bge-m3).",
+    )
+    parser.add_argument(
+        "--min-chunk-chars",
+        dest="min_chunk_chars",
+        type=int,
+        help="Drop chunks whose body minus heading is shorter than this.",
+    )
+    parser.add_argument(
         "--no-ocr",
         dest="ocr_enabled",
         action="store_false",
@@ -117,7 +129,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         dest="extract_tables",
         action="store_false",
         default=None,
-        help="Disable table extraction (page.find_tables()).",
+        help="Drop tables entirely (default is keep, linearised as header: value).",
     )
     parser.add_argument(
         "--no-figures",
@@ -203,6 +215,8 @@ def main(argv: list[str] | None = None) -> int:
         "target_tokens": args.target_tokens,
         "overlap_pct": args.overlap_pct,
         "min_tokens": args.min_tokens,
+        "max_tokens": args.max_tokens,
+        "min_chunk_chars": args.min_chunk_chars,
         "sink": args.sink,
     }
     if args.ocr_enabled is not None:
@@ -246,6 +260,8 @@ def main(argv: list[str] | None = None) -> int:
     log.info("  target_tokens   : %s", cfg.target_tokens)
     log.info("  overlap_pct     : %s", cfg.overlap_pct)
     log.info("  min_tokens      : %s", cfg.min_tokens)
+    log.info("  max_tokens      : %s", cfg.max_tokens)
+    log.info("  min_chunk_chars : %s", cfg.min_chunk_chars)
     log.info("  ocr_enabled     : %s", cfg.ocr_enabled)
     log.info("  extract_tables  : %s", cfg.extract_tables)
     log.info("  extract_figures : %s", cfg.extract_figures)

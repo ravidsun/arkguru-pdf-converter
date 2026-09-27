@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Optional
 
 from common.schema import Chunk, write_jsonl, write_parquet
+from common.tokenizer import DEFAULT_MAX_TOKENS
 
 from .chunk import chunk_page
 from .dedup import near_dedup
@@ -42,6 +43,8 @@ class Phase2Config:
     target_tokens: int = 550
     overlap_pct: float = 0.15
     min_tokens: int = 80
+    max_tokens: int = DEFAULT_MAX_TOKENS
+    min_chunk_chars: int = 80
     min_content_chars: int = 200
     dedup: bool = True
     sink: str = "file"              # file | postgres
@@ -87,6 +90,8 @@ def pages_to_chunks(result: CrawlResult, cfg: Phase2Config) -> list[Chunk]:
             overlap_pct=cfg.overlap_pct,
             min_tokens=cfg.min_tokens,
             min_content_chars=cfg.min_content_chars,
+            max_tokens=cfg.max_tokens,
+            min_chunk_chars=cfg.min_chunk_chars,
         ))
     if cfg.dedup:
         before = len(chunks)
@@ -180,6 +185,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--sink", choices=["file", "postgres"])
     ap.add_argument("--datastore-config", dest="datastore_config")
     ap.add_argument("--out-dir", dest="out_dir")
+    ap.add_argument("--max-tokens", dest="max_tokens", type=int)
+    ap.add_argument("--min-chunk-chars", dest="min_chunk_chars", type=int)
     ap.add_argument("--no-pdfs", dest="download_pdfs", action="store_false",
                     default=None)
     ap.add_argument("--no-ingest-pdfs", dest="ingest_pdfs", action="store_false",
