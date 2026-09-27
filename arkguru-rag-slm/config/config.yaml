@@ -29,10 +29,14 @@ phase3:
   retrieval:
     top_k_vector: 60         # needs datastore.yaml hnsw_ef_search >= this
     top_k_bm25: 60
+    top_k_phrase: 60         # phraseto_tsquery leg (multi-word lexicon terms)
     top_k_candidates: 120    # how many the cross-encoder gets to rerank
     top_k_final: 6           # returned after rerank
     use_parent_expansion: true
     rewriter: noop           # noop | lexicon (see phase3_rag/rewrite.py)
+    phrase_lexicon: "phase3_rag/golden/domain_lexicon.json"
+    filter_source_type: null # optional metadata filter for search_chunks v2
+    filter_lang: null        # optional lang filter (e.g. en)
     allow_model_mismatch: false  # true => warn only when stored model != query
   serve:
     backend: "ollama"

@@ -18,9 +18,9 @@ Metrics are reported overall and segmented three ways:
   * ``source_type`` -- a single bucket today (the corpus is 100% pdf), and the
     hook for later answering whether a web crawl helped or hurt
 
-Leg attribution comes from ``dense_rank`` / ``lexical_rank``, which the
-``search_chunks`` SQL function already returns, so a regression can be traced to
-the dense or the lexical side rather than guessed at.
+Leg attribution comes from ``dense_rank`` / ``lexical_rank`` / ``phrase_rank``,
+which ``search_chunks`` v2 returns, so a regression can be traced to the dense,
+websearch, or phrase side rather than guessed at.
 """
 from __future__ import annotations
 
@@ -33,12 +33,15 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Iterable, Optional, Sequence
 
+from common.phrase import detect_phrase_terms, load_multiword_terms
+from common.rrf import reciprocal_rank_fusion
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("phase3.eval_retrieval")
 
 RECALL_KS = (5, 10, 20, 50)
 # search_chunks column order (see common/datastore._HIT_COLS + the rank columns)
-_CHUNK_ID, _RRF, _DENSE_RANK, _LEX_RANK = 0, 10, 11, 12
+_CHUNK_ID, _RRF, _DENSE_RANK, _LEX_RANK, _PHRASE_RANK = 0, 10, 11, 12, 13
 
 
 # --------------------------------------------------------------------------
@@ -94,12 +97,15 @@ class RetrievalEvaluator:
         runs = []
         for v in variants:
             qvec = self.embedder.encode([v])[0].tolist()
+            phrases = None
+            lex_path = Path(__file__).parent / "golden" / "domain_lexicon.json"
+            if lex_path.is_file():
+                phrases = detect_phrase_terms(v, load_multiword_terms(lex_path)) or None
             runs.append(self.store.search_chunks(
                 v, qvec, k_dense=self.k_dense, k_lexical=self.k_lexical,
-                k_final=self.k_candidates))
+                k_final=self.k_candidates, phrase_terms=phrases))
         if len(runs) == 1:
             return runs[0]
-        from common.rrf import reciprocal_rank_fusion
         return reciprocal_rank_fusion(runs)
 
     def evaluate_row(self, row: dict) -> dict:
@@ -109,13 +115,15 @@ class RetrievalEvaluator:
         hit_positions = [i for i, cid in enumerate(ranked) if cid in relevant]
 
         # which leg surfaced the relevant chunks?
-        dense_found = lexical_found = 0
+        dense_found = lexical_found = phrase_found = 0
         for r in rows:
             if r[_CHUNK_ID] in relevant:
                 if r[_DENSE_RANK] is not None:
                     dense_found += 1
                 if r[_LEX_RANK] is not None:
                     lexical_found += 1
+                if len(r) > _PHRASE_RANK and r[_PHRASE_RANK] is not None:
+                    phrase_found += 1
 
         out = {
             "stratum": row.get("stratum", "unknown"),
@@ -127,6 +135,7 @@ class RetrievalEvaluator:
             "first_hit_rank": (hit_positions[0] + 1) if hit_positions else None,
             "dense_leg_hits": dense_found,
             "lexical_leg_hits": lexical_found,
+            "phrase_leg_hits": phrase_found,
         }
         for k in RECALL_KS:
             out[f"recall@{k}"] = recall_at_k(ranked, relevant, k)
@@ -143,6 +152,7 @@ def aggregate(per_row: Sequence[dict]) -> dict:
         d["mean_candidates"] = round(_mean(r["candidates"] for r in rows), 1)
         d["dense_leg_hits"] = sum(r["dense_leg_hits"] for r in rows)
         d["lexical_leg_hits"] = sum(r["lexical_leg_hits"] for r in rows)
+        d["phrase_leg_hits"] = sum(r.get("phrase_leg_hits", 0) for r in rows)
         d["found_any"] = sum(1 for r in rows if r["first_hit_rank"] is not None)
         return d
 

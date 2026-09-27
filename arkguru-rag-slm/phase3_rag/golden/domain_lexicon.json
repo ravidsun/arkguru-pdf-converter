@@ -50,6 +50,7 @@
     {"canonical": "exaltation", "variants": ["Ucca", "Uccha", "exaltation", "exalted"]},
     {"canonical": "retrograde", "variants": ["Vakr\u012b", "Vakri", "retrograde"]},
     {"canonical": "cusp sub lord", "variants": ["CSL", "cusp sub lord", "sub lord"]},
+    {"canonical": "sub sub lord", "variants": ["SSL", "sub sub lord", "sub-sub lord", "sub-sub-lord"]},
 
     {"canonical": "ninth division", "variants": ["Nav\u0101\u1e41\u015ba", "Navamsa", "Navamsha", "D9", "ninth division"]},
     {"canonical": "twelfth division", "variants": ["Dv\u0101da\u015b\u0101\u1e41\u015ba", "Dvadasamsa", "D12", "twelfth division"]},

@@ -1,5 +1,7 @@
 """
-Daily custom-format dump of chunks + chunk_embeddings when the watermark moved.
+Daily custom-format dump of the datastore schema (tables, indexes, functions)
+when the watermark moved. ``--schema`` dumps the whole schema so a restore
+recreates ``search_chunks`` as well as the two tables.
 
   python -m phase3_rag.backup --once
   python -m phase3_rag.backup --interval 86400
@@ -91,11 +93,13 @@ def run_backup(
         pg_dump,
         "-Fc",
         f"--dbname={dsn}",
-        f"--table={store.chunks}",
-        f"--table={store.vectors}",
+        f"--schema={store.schema}",
         f"--file={dump_path}",
     ]
-    log.info("dumping %s and %s -> %s", store.chunks, store.vectors, dump_path)
+    log.info(
+        "dumping schema %s (tables, indexes, functions) -> %s",
+        store.schema, dump_path,
+    )
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
         if dump_path.exists():
