@@ -295,10 +295,11 @@ def test_search_chunks_ddl_uses_hnsw_safe_dense_subquery():
 
 
 def test_search_chunks_ddl_falls_back_from_and_to_or_lexical_query():
-    """plainto ANDs every term, which a natural question rarely satisfies."""
+    """websearch ANDs unquoted terms, which a natural question rarely satisfies."""
     sql = _search_chunks_ddl("chunks", "chunk_embeddings")
-    # AND is still tried first
-    assert "lex_and AS (\n  SELECT plainto_tsquery('english', query_text)" in sql
+    # AND is still tried first (websearch, not plainto)
+    assert "lex_and AS (\n  SELECT websearch_to_tsquery('english', query_text)" in sql
+    assert "plainto_tsquery" not in sql
     # the OR form is built from the query's own lexemes
     assert "tsvector_to_array(" in sql
     assert "' | '" in sql
@@ -325,7 +326,7 @@ def test_search_chunks_ddl_quotes_lexemes():
     assert "quote_literal(lx)" in sql
 
 
-def test_search_chunks_ddl_keeps_thirteen_column_contract():
+def test_search_chunks_ddl_keeps_fourteen_column_contract():
     """Phase 3 indexes these positionally; new columns may only be appended."""
     sql = _search_chunks_ddl("chunks", "chunk_embeddings")
     returns = sql.split("RETURNS TABLE (")[1].split(")\nLANGUAGE")[0]
@@ -333,8 +334,20 @@ def test_search_chunks_ddl_keeps_thirteen_column_contract():
     assert cols == [
         "chunk_id", "text", "section", "source_id", "page", "url",
         "parent_id", "chunk_index", "title", "lang",
-        "rrf_score", "dense_rank", "lexical_rank",
+        "rrf_score", "dense_rank", "lexical_rank", "phrase_rank",
     ]
+
+
+def test_search_chunks_ddl_has_phrase_leg_and_quality_gate():
+    sql = _search_chunks_ddl("chunks", "chunk_embeddings")
+    assert "phraseto_tsquery('english'" in sql
+    assert "phrase_terms" in sql
+    assert "FULL OUTER JOIN phrase" in sql
+    assert "filter_lang" in sql
+    assert "quality" in sql
+    assert "embed" in sql
+    dense_block = sql.split("dense_hits AS")[0]
+    assert "JOIN chunks" not in dense_block
 
 
 def test_coerce_ef_search_accepts_ints_and_numeric_strings():
@@ -400,6 +413,7 @@ def test_search_chunks_selects_sql_function(monkeypatch):
     rows = _store().search_chunks("q", [0.1, 0.2], k_dense=20, k_lexical=20, k_final=6)
     assert "FROM search_chunks(" in cur.sql
     assert "%s::vector" in cur.sql
+    assert cur.params[-1] is None  # phrase_terms
     assert rows[0][0] == "id0"
     assert rows[0][1] == "hello"
 
@@ -508,8 +522,10 @@ def test_delete_by_source_id(monkeypatch):
 def test_ensure_schema_creates_web_schema(monkeypatch):
     class _Cur(_FakeCursor):
         def fetchone(self):
-            # to_regclass -> missing tables; SHOW / extension probes
             return (None,)
+
+        def fetchall(self):
+            return []
 
     cur = _Cur()
     conn = _FakeConn(cur)
@@ -523,23 +539,32 @@ def test_ensure_schema_creates_web_schema(monkeypatch):
     assert "CREATE INDEX IF NOT EXISTS chunks_ts_idx ON web.chunks" in joined
     assert "CREATE INDEX IF NOT EXISTS chunk_embeddings_hnsw_idx ON web.chunk_embeddings" in joined
     assert "web.chunks_ts_idx" not in joined
-    public_fn = [s for s in cur.sqls if "FUNCTION search_chunks(" in s
-                 and "FUNCTION web.search_chunks(" not in s]
+    assert "phraseto_tsquery" in joined
+    public_fn = [s for s in cur.sqls if "FUNCTION public.search_chunks(" in s]
     assert public_fn == []
 
 
-def test_ensure_schema_public_does_not_create_web_schema(monkeypatch):
+def test_ensure_schema_public_requires_explicit_flag(monkeypatch):
+    from common.migrate import PublicSchemaForbidden
+
     class _Cur(_FakeCursor):
         def fetchone(self):
             return (None,)
 
+        def fetchall(self):
+            return []
+
     cur = _Cur()
     conn = _FakeConn(cur)
     monkeypatch.setattr(ChunkStore, "_connect", lambda self: conn)
-    ChunkStore(dsn="postgresql://unused").ensure_schema()
+    with pytest.raises(PublicSchemaForbidden, match="public"):
+        ChunkStore(dsn="postgresql://unused").ensure_schema()
+    ChunkStore(
+        dsn="postgresql://unused", allow_public_schema=True
+    ).ensure_schema()
     joined = " ".join(cur.sqls)
     assert "CREATE SCHEMA IF NOT EXISTS web" not in joined
-    assert "CREATE OR REPLACE FUNCTION search_chunks(" in joined
+    assert "CREATE OR REPLACE FUNCTION public.search_chunks(" in joined
     assert "FUNCTION web.search_chunks(" not in joined
 
 

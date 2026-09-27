@@ -168,7 +168,9 @@ def test_hybrid_search_calls_store_search_chunks():
     hits = retr.search("what is yoga")
     assert retr.store.kw["k_dense"] == 20
     assert retr.store.kw["k_lexical"] == 20
+    assert retr.store.kw["k_phrase"] == 20
     assert retr.store.kw["k_final"] == 40
+    assert retr.store.hnsw_ef_search == 20
     assert len(hits) == 1
     assert hits[0].chunk_id == "id0"
     assert hits[0].text == "hello"
@@ -231,8 +233,10 @@ def test_config_retrieval_knobs_are_consistent():
     ds = yaml.safe_load(open("config/datastore.yaml"))["datastore"]["postgres"]
     rc = cfg["retrieval"]
     assert ds["hnsw_ef_search"] >= rc["top_k_vector"]
+    assert rc["top_k_phrase"] >= 1
     assert rc["top_k_candidates"] >= max(rc["top_k_vector"], rc["top_k_bm25"])
     assert rc["top_k_final"] <= rc["top_k_candidates"]
+    assert rc.get("phrase_lexicon")
 
 
 def test_expand_hits_swaps_parent_text_and_dedupes():
@@ -276,6 +280,39 @@ def test_backup_fails_closed_without_pg_dump(monkeypatch):
     monkeypatch.setattr("phase3_rag.backup.shutil.which", lambda _name: None)
     with pytest.raises(RuntimeError, match="pg_dump"):
         run_backup()
+
+
+def test_backup_dumps_schema_not_just_tables(monkeypatch, tmp_path):
+    class _Store:
+        chunks = "v2.chunks"
+        vectors = "v2.chunk_embeddings"
+        schema = "v2"
+
+        def created_at_watermark(self):
+            return "2026-09-27 00:00:00+00"
+
+    captured = {}
+
+    def fake_run(cmd, capture_output=True, text=True):
+        captured["cmd"] = cmd
+
+        class _R:
+            returncode = 0
+            stderr = ""
+            stdout = ""
+        return _R()
+
+    monkeypatch.setattr(
+        "phase3_rag.backup.resolve_dsn", lambda *a, **k: "postgresql://example"
+    )
+    monkeypatch.setattr("phase3_rag.backup.shutil.which", lambda _name: "/usr/bin/pg_dump")
+    monkeypatch.setattr("phase3_rag.backup.load_datastore_config", lambda *a, **k: {"postgres": {}})
+    monkeypatch.setattr("phase3_rag.backup.open_chunk_store", lambda *a, **k: _Store())
+    monkeypatch.setattr("phase3_rag.backup.subprocess.run", fake_run)
+    out = run_backup(out_dir=tmp_path)
+    assert out.startswith("wrote")
+    assert "--schema=v2" in captured["cmd"]
+    assert not any(c.startswith("--table=") for c in captured["cmd"])
 
 
 def test_list_jsonl_files_rglob(tmp_path: Path):

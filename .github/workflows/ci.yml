@@ -1,0 +1,114 @@
+name: CI
+
+on:
+  push:
+    branches: [develop, main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ARKGURU_TOKENIZER: tiktoken
+  HF_HUB_OFFLINE: "1"
+  TRANSFORMERS_OFFLINE: "1"
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
+jobs:
+  pytest:
+    name: pytest / ${{ matrix.package }} / ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.14"]
+        package:
+          - common
+          - pdf
+          - web
+          - rag
+          - ui
+          - root
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          allow-prereleases: true
+      - name: Install and test
+        run: |
+          set -euo pipefail
+          python -m pip install -U pip
+          case "${{ matrix.package }}" in
+            common)
+              python -m pip install -e "arkguru-common[test,postgres]"
+              (cd arkguru-common && python -m pytest tests -q -m "not pgvector")
+              ;;
+            pdf)
+              python -m pip install -e "arkguru-common[test]"
+              python -m pip install -r arkguru-pdf-extraction/requirements.txt pytest
+              (cd arkguru-pdf-extraction && python -m pytest tests -q)
+              ;;
+            web)
+              python -m pip install -e "arkguru-common[test]"
+              python -m pip install -r arkguru-web-scraping/requirements.txt pytest
+              (cd arkguru-web-scraping && python -m pytest tests -q)
+              ;;
+            rag)
+              python -m pip install -e "arkguru-common[test,postgres]"
+              python -m pip install pytest pyyaml numpy
+              (cd arkguru-rag-slm && PYTHONPATH=. python -m pytest tests -q -m "not pgvector")
+              ;;
+            ui)
+              python -m pip install -r arkguru-ui/requirements.txt
+              (cd arkguru-ui && PYTHONPATH=. python -m pytest tests -q)
+              ;;
+            root)
+              python -m pip install pytest
+              python -m pytest tests -q
+              ;;
+          esac
+
+  search-chunks-v2:
+    name: search_chunks v2 (pgvector / Postgres 16)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: rag
+          POSTGRES_PASSWORD: change-me
+          POSTGRES_DB: rag
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U rag -d rag"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      PG_DSN: postgresql://rag:change-me@127.0.0.1:5432/rag
+      ARKGURU_TOKENIZER: tiktoken
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install (no embedding models)
+        run: |
+          python -m pip install -U pip
+          python -m pip install -e "arkguru-common[test,postgres]"
+          python -m pip install pytest pyyaml numpy
+      - name: Apply migrations to schema v2 (dry-run then apply)
+        run: |
+          python -m common.migrate --schema v2 --dry-run
+          python -m common.migrate --schema v2 --apply
+      - name: search_chunks v2 + Phase 4 checks
+        run: |
+          cd arkguru-rag-slm
+          PYTHONPATH=. python -m pytest tests/test_search_chunks_v2_pg.py -q -m pgvector
+          python -m common.validate_schema --schema ci_search_v2 --sql-only
+          python -m common.validate_schema --schema v2
