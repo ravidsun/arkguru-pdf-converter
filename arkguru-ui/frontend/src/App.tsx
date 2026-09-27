@@ -34,7 +34,7 @@ const emptyP2 = (d?: Defaults | null): Phase2State => ({
 
 const emptyP3 = (d?: Defaults | null): Phase3State => ({
   sink: "file",
-  embedder: "hashing",
+  embedder: "sentence_transformer",
   include_phase1: true,
   include_phase2: true,
   skip_finetune: true,

@@ -149,12 +149,14 @@ cd arkguru-rag-slm
 pip install -r requirements.txt
 
 # One command: extract Phase 1 PDFs, ingest, then chat
-python -m phase3_rag.run_pdfs --pdfs /path/to/your_pdfs --embedder hashing \
+python -m phase3_rag.run_pdfs --pdfs /path/to/your_pdfs \
     --ask "your question here"
 
-# On production hardware (with local LLM), switch embedder + model:
-python -m phase3_rag.run_pdfs --pdfs /path/to/pdfs --embedder sentence_transformer \
-    --model domain-slm --chat
+# Hashing is tests/dev only (file store, or Postgres with --allow-hashing):
+# python -m phase3_rag.run_pdfs --pdfs /path/to/your_pdfs --embedder hashing
+
+# On production hardware (with local LLM):
+python -m phase3_rag.run_pdfs --pdfs /path/to/pdfs --model domain-slm --chat
 ```
 
 ### Full production setup
@@ -209,8 +211,8 @@ Then merge, convert to GGUF, quantize to Q4_K_M, and register with Ollama:
 
 ```bash
 # Option A: chunks already in Postgres (Phase 1 --sink postgres)
-python -m phase3_rag.embed_datastore --embedder sentence_transformer \
-    --model BAAI/bge-m3 --dim 1024
+python -m phase3_rag.embed_datastore --model BAAI/bge-m3 --dim 1024
+# Re-embed public on CUDA (Windows PowerShell: $env:PG_DSN = "..."; --device cuda --reembed --schema public)
 
 # Option B: JSONL corpus → Postgres chunks + embeddings
 make index
@@ -278,8 +280,8 @@ serve:
 ```
 
 **Embedder choices:**
-- `hashing`: Offline testing (no downloads, deterministic, low quality)
-- `sentence_transformer`: Production (SOTA, ~100–300 queries/s CPU)
+- `sentence_transformer` / `BAAI/bge-m3` (default): production, 1024-d, CUDA+fp16 when available
+- `hashing`: tests/dev only (`--embedder hashing`; Postgres also needs `--allow-hashing`)
 
 ### Hybrid retrieve (`search_chunks`)
 

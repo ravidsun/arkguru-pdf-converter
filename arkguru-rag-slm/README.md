@@ -19,16 +19,17 @@ pip install -r requirements.txt
 
 # ---- EASIEST: one command does Phase 1 + ingest (no manual copying) ----
 # Assumes arkguru-pdf-extraction is checked out next to this repo.
-python -m phase3_rag.run_pdfs --pdfs /path/to/your_pdfs --embedder hashing \
+python -m phase3_rag.run_pdfs --pdfs /path/to/your_pdfs \
     --ask "your question here"
 # add more PDFs anytime with the same command (only new chunks are embedded):
-python -m phase3_rag.run_pdfs --pdfs /path/to/more_pdfs --embedder hashing
+python -m phase3_rag.run_pdfs --pdfs /path/to/more_pdfs
 # Postgres two-table handoff (Phase 1 fills `chunks`, then embed_datastore):
 #   export PG_DSN=...   # Session pooler on Cloud; see docs/DATABASE_SETUP.md
-#   python -m phase3_rag.run_pdfs --pdfs /path/to/your_pdfs --sink postgres \
-#       --embedder hashing
-# on your NUC, real embeddings + generated answers:
-#   ... --embedder sentence_transformer --model domain-slm --chat
+#   python -m phase3_rag.run_pdfs --pdfs /path/to/your_pdfs --sink postgres
+# hashing is tests/dev only (file store, or Postgres with --allow-hashing):
+#   ... --embedder hashing
+# on your NUC, generated answers:
+#   ... --model domain-slm --chat
 
 # ---- OR the manual two-step (more control) ----
 # 1) Produce chunks from 1–2 PDFs using the Phase 1 repo (arkguru-pdf-extraction),
@@ -36,24 +37,29 @@ python -m phase3_rag.run_pdfs --pdfs /path/to/more_pdfs --embedder hashing
 
 # 2) Ingest + ask — offline embedder, no model downloads, runs anywhere:
 python -m phase3_rag.quickstart --add data/processed/pdf_chunks.jsonl \
-    --embedder hashing --ask "your question here"
+    --ask "your question here"
 
 # 3) Add MORE PDFs later — only new chunks are embedded (idempotent by chunk_id):
 python -m phase3_rag.quickstart --add data/processed/new_batch.jsonl \
-    --embedder hashing --ask "another question"
+    --ask "another question"
 
-# 4) On your NUC: switch to REAL embeddings + a local LLM for generated answers:
+# 4) On your NUC: local LLM for generated answers (embedder already defaults to bge-m3):
 python -m phase3_rag.quickstart --add data/processed/pdf_chunks.jsonl \
-    --embedder sentence_transformer --model-name BAAI/bge-m3 \
     --model domain-slm --chat
+
+# hashing (tests/dev, file store only — do not use for the production DB):
+#   python -m phase3_rag.quickstart --add data/processed/pdf_chunks.jsonl --embedder hashing
 ```
 
-**Two embedder backends** (`phase3_rag/embedder.py`): `hashing` is
-dependency-free (numpy only), deterministic, fixed-dimension — perfect for
-offline testing of the pipeline; `sentence_transformer` uses real `bge-m3`
-embeddings on your machine. **Answers:** if a local Ollama model is given via
-`--model`, the quickstart generates a grounded answer; otherwise it prints the
-retrieved context (extractive) so you can verify retrieval with zero model setup.
+**Two embedder backends** (`phase3_rag/embedder.py`): `sentence_transformer` /
+`BAAI/bge-m3` (1024-d) is the **default everywhere**. `hashing` is
+dependency-free (numpy only) and only runs when you pass `--embedder hashing`;
+Postgres writes also require `--allow-hashing`. Device is `auto` (CUDA + fp16
+if available, else CPU), override with `--device cpu|cuda`. Default `--batch`
+is 16 (sized for a 6 GB RTX 3050). `max_seq_length` stays 512. Zero / NaN
+vectors are never stored (skipped and counted). **Answers:** if a local Ollama
+model is given via `--model`, the quickstart generates a grounded answer;
+otherwise it prints the retrieved context (extractive).
 
 **Verified end-to-end** (offline embedder, 3 sample PDFs): ingest 2 PDFs → ask →
 correct chunk ranks #1; add a 3rd PDF later → 2 new chunks appended, its content
@@ -95,14 +101,32 @@ vectors live apart, you can **re-embed with a different model by truncating just
 export PG_DSN=postgresql://user:pass@localhost:5432/rag
 # Phase 1/2 already wrote the `chunks` table (`chunk_index` lives there, 0-based).
 # Fill the `chunk_embeddings` table (vectors only — no chunk_index column):
-python -m phase3_rag.embed_datastore --embedder hashing --dim 1024          # Cloud-safe
-# NUC / production embeddings:
-python -m phase3_rag.embed_datastore --embedder sentence_transformer --model BAAI/bge-m3 --dim 1024
+python -m phase3_rag.embed_datastore --model BAAI/bge-m3 --dim 1024
+# Re-embed an existing schema (resumable: rows already labelled BAAI/bge-m3 are skipped):
+python -m phase3_rag.embed_datastore --schema public --reembed --device cuda --model BAAI/bge-m3 --dim 1024
 # retrieve.py / serve.py then call ChunkStore.search_chunks (SQL RRF).
 ```
-`embed_datastore.py` is idempotent — it only embeds child rows still missing from
-`chunk_embeddings`, so adding more PDFs later just means re-running it. Embeddings
-are disposable and model-specific; the chunks are the durable source of truth.
+`embed_datastore.py` is idempotent — without `--reembed` it only embeds child
+rows still missing from `chunk_embeddings`. `--reembed` also rewrites rows
+whose `model` is NULL, blank, or different from `--model`. Every write sets
+`chunk_embeddings.model` to the real label (`BAAI/bge-m3` or `hashing`).
+Retrieval fails at startup if the stored model does not match the query
+embedder (override: `--allow-model-mismatch` / `retrieval.allow_model_mismatch`).
+
+### Windows 11 + RTX 3050 6 GB (PowerShell)
+
+```powershell
+cd arkguru-rag-slm
+.\.venv\Scripts\Activate.ps1
+$env:PG_DSN = "postgresql://user:pass@localhost:5432/rag"
+# First run downloads BAAI/bge-m3 (~2 GB) into the Hugging Face cache.
+python -m phase3_rag.embed_datastore --schema public --reembed --device cuda --model BAAI/bge-m3 --dim 1024
+# If you OOM, drop the batch:  --batch 8
+# CPU fallback:               --device cpu --batch 32
+```
+
+CUDA is used automatically when `torch.cuda.is_available()`; `--device cuda`
+forces it. Embeddings run in fp16 on CUDA. `max_seq_length` is 512.
 
 ## How it works (the logic)
 
@@ -138,9 +162,10 @@ projections. Expect ~12–24 h for a 3B model on this NUC; a GPU later cuts that
 Upserts a JSONL corpus into the **`chunks` table**, embeds with a local model
 (`bge-m3` default), and writes vectors to **`chunk_embeddings`** (HNSW). Lexical
 search uses the `tsvector` on `chunks`. `--embed-only` fills missing vectors when
-chunks are already in Postgres (same as `embed_datastore`). Use `--embedder
-hashing` on Cloud; `sentence_transformer` on the NUC. Missing embedding rows are
-streamed with a server-side cursor.
+chunks are already in Postgres (same as `embed_datastore`). Default embedder is
+`sentence_transformer` / `BAAI/bge-m3`; `--embedder hashing` also needs
+`--allow-hashing` for Postgres. Missing embedding rows are streamed with a
+server-side cursor. `--reembed` lives on `embed_datastore`.
 
 **3. Retrieve (`retrieve.py`).** Per query when `PG_DSN` is set: embed in Python
 → one SQL call `search_chunks()` (HNSW + GIN FTS, RRF, `is_parent = false`) →
@@ -216,16 +241,16 @@ export PG_DSN=postgresql://user:pass@localhost:5432/rag
 
 # Option A: JSONL corpus → Postgres chunks + embeddings (not the local .npz store)
 make index
-# Cloud-safe hashing, or skip JSONL when Phase 1 already used --sink postgres:
-python -m phase3_rag.index --embed-only --embedder hashing
+# Skip JSONL when Phase 1 already used --sink postgres:
+python -m phase3_rag.index --embed-only
 
 # Option B (shared datastore): fill embeddings for chunks already in the table
-python -m phase3_rag.embed_datastore --embedder hashing --dim 1024   # make embed-db
-# NUC:
-python -m phase3_rag.embed_datastore --embedder sentence_transformer \
-    --model BAAI/bge-m3 --dim 1024
+python -m phase3_rag.embed_datastore --model BAAI/bge-m3 --dim 1024   # make embed-db
+# Re-embed public on a GPU (resumable):
+python -m phase3_rag.embed_datastore --schema public --reembed --device cuda --model BAAI/bge-m3 --dim 1024
 ```
-`embed_datastore` only embeds child rows still missing from `chunk_embeddings`.
+`embed_datastore` only embeds child rows still missing from `chunk_embeddings`
+unless you pass `--reembed`.
 
 **File mode:** skip Postgres. `run_pdfs` / `quickstart` write `data/store/index.{npz,jsonl}`.
 `JsonlRetriever` is used when **no** `PG_DSN` is set.
@@ -256,12 +281,11 @@ Run the whole system as deterministic background workers (no LLM) coordinated by
 a small DAG orchestrator.
 
 **Phase 3 worker** — polls the datastore and embeds any chunks that lack vectors.
-`--once` (Cloud / orchestrator) defaults to the hashing embedder;
-a long-running daemon defaults to `sentence_transformer` for the NUC:
+Default is always `sentence_transformer` / `BAAI/bge-m3` (including `--once`):
 ```bash
-python -m phase3_rag.worker --once                 # hashing
-python -m phase3_rag.worker --interval 60          # sentence_transformer (make worker)
-python -m phase3_rag.worker --once --embedder hashing
+python -m phase3_rag.worker --once
+python -m phase3_rag.worker --interval 60          # make worker
+python -m phase3_rag.worker --once --embedder hashing --allow-hashing   # tests/dev only
 ```
 
 **Orchestrator** (`orchestrator.py` + `orchestrator.yaml`) — runs the phase
@@ -269,7 +293,7 @@ workers as a dependency-ordered pipeline: `ingest_pdfs` → `index_embeddings`
 (and `crawl_web` when enabled). `index_embeddings` depends only on PDF ingest
 while web crawl is disabled, so embeddings still run after a PDF-only pass.
 `ingest_pdfs` uses `--sink postgres` when `PG_DSN` is set. `index_embeddings`
-uses `--once --embedder hashing`. Steps run in topological order; a step is
+uses `--once` (sentence_transformer / bge-m3). Steps run in topological order; a step is
 skipped if a dependency failed, so you never embed chunks that weren't ingested.
 It shells out to the nested phase folders (`arkguru-pdf-extraction`,
 `arkguru-web-scraping`). Adjust `cwd` in `orchestrator.yaml` if you move them.
@@ -375,8 +399,8 @@ python -m phase3_rag.serve --ask "What does error code E14 mean?"
 - **Ingestion (Phases 1–2)** is CPU-bound; OCR is the heavy part, so a larger
   cloud CPU helps. No GPU needed. Outputs are portable (JSONL/Parquet or the DB).
 - **Serving / fine-tuning (Phase 3)** targets the NUC (Core Ultra 9 185H, 96 GB).
-  Embeddings + reranker run on CPU today; a future GPU speeds them up
-  (`device="cuda"`, and vLLM for serving).
+  Embeddings auto-detect CUDA (fp16) and fall back to CPU; override with
+  `--device` / `embedding_device`. A GPU also helps serving (vLLM).
 - **Postgres** can live on the NUC (simplest) or a small VPS so cloud ingestion
   can reach it — prefer an **SSH tunnel** over exposing 5432 (see DATABASE_SETUP.md).
 
@@ -454,11 +478,12 @@ retrieval:
 - Quality: SOTA for dense retrieval
 - Cost: One-time download (~2GB), then zero inference cost
 
-**`hashing` (offline testing):**
+**`hashing` (tests/dev only — never the default):**
 - No model download, runs anywhere
-- Speed: 100K+ queries/s
-- Deterministic and reproducible
-- Good for pipeline testing; NOT for production (low quality)
+- Must be requested with `--embedder hashing`
+- Postgres writes also need `--allow-hashing` (refused otherwise)
+- Stored `model` label is always `hashing`, never `BAAI/bge-m3`
+- Good for pipeline testing; NOT for production (low quality, ASCII-only tokens)
 
 ## Troubleshooting
 
@@ -502,10 +527,11 @@ model.gradient_checkpointing_enable()  # trade compute for memory
 ```
 
 ### Re-embed with a different model
-→ truncate only the `chunk_embeddings` table; chunks are untouched and reusable:
+→ `--reembed` rewrites rows whose stored model differs (resumable). Or truncate
+only `chunk_embeddings`; chunks are untouched:
 ```bash
-psql $PG_DSN -c "TRUNCATE TABLE chunk_embeddings;"
-python -m phase3_rag.embed_datastore --embedder sentence_transformer --model mixedbread-ai/mxbai-embed-large --dim 1024
+python -m phase3_rag.embed_datastore --schema public --reembed --model mixedbread-ai/mxbai-embed-large --dim 1024
+# or: psql $PG_DSN -c "TRUNCATE TABLE chunk_embeddings;" then embed without --reembed
 ```
 
 ## Advanced: Evaluation metrics (RAGAS)

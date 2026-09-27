@@ -7,10 +7,12 @@ import pytest
 
 from common.schema import Chunk, write_jsonl
 from phase3_rag.backup import run_backup, should_skip
+from phase3_rag.embedder import EmbeddingModelMismatch
 from phase3_rag.retrieve import (
     Hit,
     JsonlRetriever,
     create_retriever,
+    encode_query,
     expand_hits_with_parents,
     list_jsonl_files,
 )
@@ -48,6 +50,61 @@ def test_dsn_set_raises_on_connect_failure(monkeypatch):
     monkeypatch.setattr("phase3_rag.retrieve._probe_postgres", boom)
     with pytest.raises(RuntimeError, match="DSN is set"):
         create_retriever({"datastore_config": "missing.yaml"})
+
+
+def test_encode_query_supports_embedder_and_st_apis():
+    class _Emb:
+        backend = "hashing"
+
+        def encode(self, texts, batch_size=None):
+            return [[0.2, 0.3]]
+
+    class _ST:
+        def encode(self, query, normalize_embeddings=True):
+            class _Vec:
+                def tolist(self):
+                    return [0.4, 0.5]
+            return _Vec()
+
+    assert encode_query(_Emb(), "q") == [0.2, 0.3]
+    assert encode_query(_ST(), "q") == [0.4, 0.5]
+
+
+def test_hybrid_init_fails_on_model_mismatch(monkeypatch):
+    from phase3_rag.retrieve import HybridRetriever
+
+    class FakeEmb:
+        dim = 1024
+        label = "BAAI/bge-m3"
+        device = "cpu"
+
+        def __init__(self, **kw):
+            pass
+
+    class FakeStore:
+        def distinct_embedding_models(self):
+            return [None]
+
+    monkeypatch.setattr("phase3_rag.retrieve.Embedder", FakeEmb)
+    monkeypatch.setattr(
+        "common.datastore_config.open_chunk_store",
+        lambda *a, **k: FakeStore(),
+    )
+
+    def _fake_cross(*a, **k):
+        return object()
+
+    import types
+    import sys
+    fake_st = types.ModuleType("sentence_transformers")
+    fake_st.CrossEncoder = _fake_cross
+    monkeypatch.setitem(sys.modules, "sentence_transformers", fake_st)
+    with pytest.raises(EmbeddingModelMismatch, match="do not match"):
+        HybridRetriever({
+            "embedding_model": "BAAI/bge-m3",
+            "reranker_model": "unused",
+            "retrieval": {"allow_model_mismatch": False},
+        })
 
 
 def test_dsn_set_uses_hybrid_when_connect_ok(monkeypatch):

@@ -519,18 +519,50 @@ class ChunkStore:
         return n
 
     # -- embeddings (Phase 3) ---------------------------------------------
+    def _embedding_work_clause(self, *, model: Optional[str], reembed: bool
+                               ) -> tuple[str, tuple]:
+        """WHERE clause + params for rows that still need (this) embedding.
+
+        Missing-only by default. ``reembed=True`` also selects rows whose
+        stored model is NULL, blank, or different from ``model``, so a
+        crashed re-embed job resumes by skipping already-labelled rows.
+        """
+        if not reembed:
+            return "v.chunk_id IS NULL AND c.is_parent = false", ()
+        if not (model or "").strip():
+            raise ValueError("reembed requires a target model label")
+        return (
+            "c.is_parent = false AND ("
+            "v.chunk_id IS NULL OR v.model IS NULL OR btrim(v.model) = '' "
+            "OR v.model IS DISTINCT FROM %s)",
+            ((model or "").strip(),),
+        )
+
     def iter_missing_embeddings(self, batch: int = 256
                                 ) -> Iterator[list[tuple[str, str]]]:
         """Yield (chunk_id, text) for chunks that have no row in the vectors table.
 
         Uses a server-side cursor so the client does not buffer the full result set.
         """
+        return self.iter_chunks_for_embedding(batch=batch, reembed=False)
+
+    def iter_chunks_for_embedding(
+        self, batch: int = 256, *, model: Optional[str] = None,
+        reembed: bool = False,
+    ) -> Iterator[list[tuple[str, str]]]:
+        """Yield (chunk_id, text) for child chunks that need embeddings.
+
+        Missing-only unless ``reembed=True`` (see ``_embedding_work_clause``).
+        """
+        where, params = self._embedding_work_clause(model=model, reembed=reembed)
         with self._connect() as conn, conn.cursor(name="missing") as cur:
             cur.itersize = batch
             cur.execute(
                 f"SELECT c.chunk_id, c.text FROM {self.chunks} c "
                 f"LEFT JOIN {self.vectors} v ON c.chunk_id = v.chunk_id "
-                f"WHERE v.chunk_id IS NULL AND c.is_parent = false")
+                f"WHERE {where}",
+                params or None,
+            )
             buf: list[tuple[str, str]] = []
             for row in cur:
                 buf.append((row[0], row[1]))
@@ -540,8 +572,18 @@ class ChunkStore:
             if buf:
                 yield buf
 
-    def update_embeddings(self, ids: list[str], vectors, model: Optional[str] = None) -> int:
-        """Upsert embeddings into the vectors table (keyed by chunk_id)."""
+    def update_embeddings(self, ids: list[str], vectors, model: str) -> int:
+        """Upsert embeddings into the vectors table (keyed by chunk_id).
+
+        ``model`` is required and stored on every row. Blank/NULL labels are
+        rejected so retrieval can trust ``chunk_embeddings.model``.
+        """
+        label = (model or "").strip()
+        if not label:
+            raise ValueError(
+                "model label is required when writing embeddings; "
+                "refusing to store NULL/blank model"
+            )
         with self._connect() as conn, conn.cursor() as cur:
             for cid, vec in zip(ids, vectors):
                 v = vec.tolist() if hasattr(vec, "tolist") else list(vec)
@@ -549,18 +591,33 @@ class ChunkStore:
                     f"INSERT INTO {self.vectors} (chunk_id, embedding, model) "
                     f"VALUES (%s, %s, %s) ON CONFLICT (chunk_id) DO UPDATE "
                     f"SET embedding = EXCLUDED.embedding, model = EXCLUDED.model, "
-                    f"created_at = now()", (cid, v, model))
+                    f"created_at = now()", (cid, v, label))
             conn.commit()
             return len(ids)
+
+    def distinct_embedding_models(self) -> list[Optional[str]]:
+        """Distinct ``model`` values currently stored (including NULL)."""
+        with self._connect() as conn, conn.cursor() as cur:
+            cur.execute(f"SELECT DISTINCT model FROM {self.vectors}")
+            return [row[0] for row in cur.fetchall()]
+
+    def count_embeddings_to_fill(
+        self, *, model: Optional[str] = None, reembed: bool = False
+    ) -> int:
+        """How many child chunks still need an embedding write."""
+        where, params = self._embedding_work_clause(model=model, reembed=reembed)
+        q = (f"SELECT count(*) FROM {self.chunks} c "
+             f"LEFT JOIN {self.vectors} v ON c.chunk_id = v.chunk_id "
+             f"WHERE {where}")
+        with self._connect() as conn, conn.cursor() as cur:
+            cur.execute(q, params or None)
+            return cur.fetchone()[0]
 
     # -- counts / reads ----------------------------------------------------
     def count(self, only_missing_embedding: bool = False) -> int:
         if only_missing_embedding:
-            q = (f"SELECT count(*) FROM {self.chunks} c "
-                 f"LEFT JOIN {self.vectors} v ON c.chunk_id = v.chunk_id "
-                 f"WHERE v.chunk_id IS NULL AND c.is_parent = false")
-        else:
-            q = f"SELECT count(*) FROM {self.chunks}"
+            return self.count_embeddings_to_fill(reembed=False)
+        q = f"SELECT count(*) FROM {self.chunks}"
         with self._connect() as conn, conn.cursor() as cur:
             cur.execute(q)
             return cur.fetchone()[0]

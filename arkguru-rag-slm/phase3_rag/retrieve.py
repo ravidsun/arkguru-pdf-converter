@@ -21,6 +21,14 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from pathlib import Path
+
+from phase3_rag.embedder import (
+    DEFAULT_BATCH_SIZE,
+    DEFAULT_MAX_SEQ_LENGTH,
+    Embedder,
+    check_stored_embedding_model,
+    resolve_device,
+)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("phase3.retrieve")
 
@@ -32,6 +40,19 @@ _C = {"chunk_id": 0, "text": 1, "section": 2, "source_id": 3, "page": 4, "url": 
 
 CONNECT_TIMEOUT_S = 15
 _PARENT_CTX_CHARS_PER_TOKEN = 3
+
+
+def encode_query(embedder, text: str) -> list[float]:
+    """Query vector from ``Embedder`` or a SentenceTransformer-like object."""
+    if getattr(embedder, "backend", None) is not None:
+        vec = embedder.encode([text])[0]
+        return vec.tolist() if hasattr(vec, "tolist") else list(vec)
+    vec = embedder.encode(text, normalize_embeddings=True)
+    if hasattr(vec, "tolist"):
+        vec = vec.tolist()
+    if vec and isinstance(vec[0], (list, tuple)):
+        return list(vec[0])
+    return list(vec)
 
 
 @dataclass
@@ -46,12 +67,23 @@ class HybridRetriever:
     def __init__(self, cfg):
         self.cfg = cfg
         from common.datastore_config import open_chunk_store
-        from sentence_transformers import SentenceTransformer, CrossEncoder
-        self.embedder = SentenceTransformer(cfg["embedding_model"], device="cpu")
+        from sentence_transformers import CrossEncoder
+        device = resolve_device(cfg.get("embedding_device"))
+        self.embedder = Embedder(
+            backend="sentence_transformer",
+            model_name=cfg["embedding_model"],
+            device=device,
+            max_seq_length=int(cfg.get("embedding_max_seq_length")
+                               or DEFAULT_MAX_SEQ_LENGTH),
+            batch_size=int(cfg.get("embedding_batch_size") or 16),
+        )
         self.store = open_chunk_store(
             cfg.get("datastore_config"),
-            dim=self.embedder.get_sentence_embedding_dimension())
-        self.reranker = CrossEncoder(cfg["reranker_model"], device="cpu")
+            dim=self.embedder.dim)
+        allow = bool((cfg.get("retrieval") or {}).get("allow_model_mismatch"))
+        check_stored_embedding_model(
+            self.store, self.embedder.label, allow_mismatch=allow)
+        self.reranker = CrossEncoder(cfg["reranker_model"], device=device)
         from phase3_rag.rewrite import build_rewriter
         self.rewriter = build_rewriter(
             cfg.get("retrieval", {}).get("rewriter"), cfg)
@@ -79,7 +111,7 @@ class HybridRetriever:
 
         runs = []
         for v in variants:
-            qvec = self.embedder.encode(v, normalize_embeddings=True).tolist()
+            qvec = encode_query(self.embedder, v)
             runs.append(self.store.search_chunks(
                 v, qvec,
                 k_dense=k_dense,
@@ -169,14 +201,20 @@ class JsonlRetriever:
         if not self._chunks:
             return
         try:
-            import numpy as np
-            from sentence_transformers import SentenceTransformer, CrossEncoder
-            self._embedder = SentenceTransformer(self.cfg["embedding_model"], device="cpu")
-            self._reranker = CrossEncoder(self.cfg["reranker_model"], device="cpu")
+            from sentence_transformers import CrossEncoder
+            device = resolve_device(self.cfg.get("embedding_device"))
+            self._embedder = Embedder(
+                backend="sentence_transformer",
+                model_name=self.cfg["embedding_model"],
+                device=device,
+                max_seq_length=int(self.cfg.get("embedding_max_seq_length")
+                                   or DEFAULT_MAX_SEQ_LENGTH),
+                batch_size=int(self.cfg.get("embedding_batch_size")
+                               or DEFAULT_BATCH_SIZE),
+            )
+            self._reranker = CrossEncoder(self.cfg["reranker_model"], device=device)
             texts = [c["text"] for c in self._chunks]
-            self._vecs = self._embedder.encode(
-                texts, batch_size=64, normalize_embeddings=True, show_progress_bar=True
-            ).astype("float32")
+            self._vecs = self._embedder.encode(texts).astype("float32")
             log.info("JsonlRetriever: pre-computed embeddings shape %s", self._vecs.shape)
         except Exception as e:
             log.warning("Could not load sentence-transformer models (%s) – BM25 only", e)
@@ -198,7 +236,7 @@ class JsonlRetriever:
         dense: list[tuple] = []
         if self._vecs is not None and self._embedder is not None:
             import numpy as np
-            qvec = self._embedder.encode(query, normalize_embeddings=True).astype("float32")
+            qvec = np.asarray(encode_query(self._embedder, query), dtype="float32")
             sims = self._vecs @ qvec
             idx = int_top_k(sims, top_k_vector)
             dense = [(*_row(self._chunks[i]), float(sims[i])) for i in idx]
@@ -358,9 +396,18 @@ if __name__ == "__main__":
     import argparse, yaml
     ap = argparse.ArgumentParser(); ap.add_argument("--config", default="config/config.yaml")
     ap.add_argument("--processed-dir", default="data/processed")
+    ap.add_argument("--device", default=None,
+                    help="auto|cpu|cuda (overrides config embedding_device)")
+    ap.add_argument("--allow-model-mismatch", action="store_true",
+                    help="Warn instead of failing when stored embeddings.model "
+                         "does not match the query embedder")
     ap.add_argument("query")
     a = ap.parse_args()
     cfg = yaml.safe_load(open(a.config))["phase3"]
+    if a.device:
+        cfg["embedding_device"] = a.device
+    if a.allow_model_mismatch:
+        cfg.setdefault("retrieval", {})["allow_model_mismatch"] = True
     r = create_retriever(cfg, a.processed_dir)
     for h in r.search(a.query):
         print(f"[{h.score:.3f}] {h.source_id} p{h.page} #{h.chunk_index} :: {h.section}\n  {h.text[:160]}...\n")

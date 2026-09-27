@@ -22,7 +22,7 @@ export function ChatPanel({
       <h2>Grounded chat</h2>
       <p className="lead">
         Uses Phase 3 <code>quickstart.retrieve</code> + <code>quickstart.answer</code> on
-        the local store (hashing embedder is the smoke path). Ollama is optional —
+        the local store (default embedder is sentence_transformer / bge-m3). Ollama is optional —
         without it the answer is extractive from the top hit.
       </p>
       {extractiveHint && (

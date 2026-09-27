@@ -107,9 +107,9 @@ for name in "${PHASES[@]}"; do
       arkguru-pdf-extraction) install_reqs "$repo" "reportlab>=4.0" "psycopg[binary]>=3.2" "pgvector>=0.3" "ocrmypdf>=16.0" "pytesseract>=0.3.10" "pillow>=10.0" ;;
       # Phase 3's full requirements.txt pulls a heavy ML/serving stack
       # (transformers, sentence-transformers, FlagEmbedding, ragas, llama-index,
-      # ...). For a lean, offline-capable dev environment we install only the
-      # core needed to run the pipeline end-to-end with the `hashing` embedder +
-      # BM25 retrieval. Install the full requirements.txt for GPU/production work.
+      # ...). The lean install is enough for file-mode plumbing; production
+      # embeddings default to sentence_transformer / BAAI/bge-m3 and need the
+      # full requirements.txt. Hashing is opt-in (--embedder hashing).
       arkguru-rag-slm) pip install "numpy>=1.24" "rank-bm25>=0.2.2" ;;
       *) install_reqs "$repo" ;;
     esac

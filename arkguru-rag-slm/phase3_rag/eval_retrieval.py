@@ -5,9 +5,10 @@ Ollama plus ``ragas`` and ``datasets``; this one scores only whether the right
 chunks come back, so it runs with nothing but numpy, psycopg and a DSN. Changes
 to the retrieval path can therefore be measured without a model or a GPU.
 
-    python -m phase3_rag.eval_retrieval --embedder hashing
-    python -m phase3_rag.eval_retrieval --embedder hashing --out baseline.json
-    python -m phase3_rag.eval_retrieval --embedder hashing --compare baseline.json
+    python -m phase3_rag.eval_retrieval
+    python -m phase3_rag.eval_retrieval --out baseline.json
+    python -m phase3_rag.eval_retrieval --compare baseline.json
+    python -m phase3_rag.eval_retrieval --embedder hashing --allow-model-mismatch
 
 Metrics are reported overall and segmented three ways:
 
@@ -218,9 +219,12 @@ def main(argv=None) -> int:
     ap.add_argument("--datastore-config", default="config/datastore.yaml")
     ap.add_argument("--golden", default="phase3_rag/golden/golden_qa.jsonl")
     ap.add_argument("--embedder", choices=("hashing", "sentence_transformer"),
-                    default="hashing")
+                    default="sentence_transformer")
     ap.add_argument("--model", default="BAAI/bge-m3")
     ap.add_argument("--dim", type=int, default=1024)
+    ap.add_argument("--device", default="auto")
+    ap.add_argument("--batch", type=int, default=16)
+    ap.add_argument("--allow-model-mismatch", action="store_true")
     ap.add_argument("--k-dense", type=int, default=None)
     ap.add_argument("--k-lexical", type=int, default=None)
     ap.add_argument("--k-candidates", type=int, default=None)
@@ -233,7 +237,7 @@ def main(argv=None) -> int:
 
     import yaml
     from common.datastore_config import open_chunk_store
-    from phase3_rag.embedder import Embedder
+    from phase3_rag.embedder import Embedder, check_stored_embedding_model
 
     cfg = yaml.safe_load(open(a.config))["phase3"]
     rc = cfg.get("retrieval", {})
@@ -242,8 +246,11 @@ def main(argv=None) -> int:
     k_candidates = (a.k_candidates if a.k_candidates is not None
                     else rc.get("top_k_candidates", max(k_dense, k_lexical)))
 
-    embedder = Embedder(backend=a.embedder, model_name=a.model, dim=a.dim)
+    embedder = Embedder(backend=a.embedder, model_name=a.model, dim=a.dim,
+                        device=a.device, batch_size=a.batch)
     store = open_chunk_store(a.datastore_config, dim=embedder.dim)
+    check_stored_embedding_model(
+        store, embedder.label, allow_mismatch=a.allow_model_mismatch)
 
     rewriter = None
     rw_name = a.rewriter or rc.get("rewriter", "noop")

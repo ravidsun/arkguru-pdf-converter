@@ -42,7 +42,7 @@ class Phase2Request(BaseModel):
 
 class Phase3Request(BaseModel):
     sink: Sink = "file"
-    embedder: EmbedderName = "hashing"
+    embedder: EmbedderName = "sentence_transformer"
     model_name: str = "BAAI/bge-m3"
     dim: int = 1024
     include_phase1: bool = True
