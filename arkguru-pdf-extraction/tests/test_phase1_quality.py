@@ -191,9 +191,11 @@ def test_ocr_to_searchable_uses_skip_text(tmp_path: Path, monkeypatch) -> None:
     called: dict = {}
     fake = types.ModuleType("ocrmypdf")
 
-    def ocr(_src, dest, skip_text=False, force_ocr=True, progress_bar=True):
+    def ocr(_src, dest, skip_text=False, force_ocr=True, progress_bar=True,
+            language=None, **_kw):
         called["skip_text"] = skip_text
         called["force_ocr"] = force_ocr
+        called["language"] = language
         Path(dest).write_bytes(b"%PDF")
 
     fake.ocr = ocr
@@ -205,6 +207,7 @@ def test_ocr_to_searchable_uses_skip_text(tmp_path: Path, monkeypatch) -> None:
     assert out.name == "ocr_scan.pdf"
     assert called["skip_text"] is True
     assert called["force_ocr"] is False
+    assert called["language"] == "eng+hin+san"
 
 
 def test_ocr_to_searchable_none_without_ocrmypdf(tmp_path: Path, monkeypatch) -> None:
