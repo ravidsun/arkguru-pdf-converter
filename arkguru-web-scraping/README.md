@@ -13,7 +13,18 @@ Web harvest is **isolated** from the book corpus:
 | Tables | `public.chunks` | `web.chunks` |
 | SQL | `public.search_chunks()` | `web.search_chunks()` |
 
-`--sink postgres` **exits** if `postgres.schema` is `public` or unset.
+`--sink postgres` **exits** if `postgres.schema` is `public` or unset
+(legacy isolation). Re-chunked web rows belong in the **same** `chunks`
+table with `source_type='web'`:
+
+```bash
+python -m phase2_web.rechunk --input web_chunks.csv --out-dir data/processed
+# optional: --sink postgres --datastore-config config/datastore.yaml
+```
+
+Site-map, `/tag/`, `/category/`, `/page/N`, and archive pages are fetched
+so their links can be followed, but they are not ingested. A link-density
+filter drops listing pages that are mostly anchors.
 
 ## Run
 

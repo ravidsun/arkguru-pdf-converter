@@ -17,13 +17,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
+from common.quality import annotate_chunks
 from common.schema import Chunk, write_jsonl, write_parquet
 from common.tokenizer import DEFAULT_MAX_TOKENS
 
 from .chunk import chunk_page
 from .dedup import near_dedup
 from .extract import extract_page
-from .fetch import CrawlResult, crawl
+from .fetch import DEFAULT_MAX_LINK_DENSITY, CrawlResult, crawl, ingest_path_denied
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -46,7 +47,9 @@ class Phase2Config:
     max_tokens: int = DEFAULT_MAX_TOKENS
     min_chunk_chars: int = 80
     min_content_chars: int = 200
+    max_link_density: float = DEFAULT_MAX_LINK_DENSITY
     dedup: bool = True
+    quality: dict = field(default_factory=dict)
     sink: str = "file"              # file | postgres
     datastore_config: str = "config/datastore.yaml"
     download_pdfs: bool = True
@@ -83,6 +86,8 @@ def open_web_store(datastore_config: str):
 def pages_to_chunks(result: CrawlResult, cfg: Phase2Config) -> list[Chunk]:
     chunks: list[Chunk] = []
     for page in result.pages:
+        if ingest_path_denied(page.url):
+            continue
         text, title = extract_page(page)
         chunks.extend(chunk_page(
             text, page.url, title=title,
@@ -97,7 +102,7 @@ def pages_to_chunks(result: CrawlResult, cfg: Phase2Config) -> list[Chunk]:
         before = len(chunks)
         chunks = near_dedup(chunks)
         log.info("dedup %d -> %d chunks", before, len(chunks))
-    return chunks
+    return annotate_chunks(chunks, quality_cfg=cfg.quality)
 
 
 def write_file_sink(chunks: list[Chunk], cfg: Phase2Config) -> Path:
@@ -164,6 +169,7 @@ def run(cfg: Phase2Config) -> list[Chunk]:
         max_pages_per_seed=cfg.max_pages_per_seed,
         delay_seconds=cfg.delay_seconds,
         same_domain_only=cfg.same_domain_only,
+        max_link_density=cfg.max_link_density,
     )
     chunks = pages_to_chunks(result, cfg)
     write_file_sink(chunks, cfg)

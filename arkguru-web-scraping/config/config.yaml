@@ -40,7 +40,14 @@ phase2:
   max_tokens: 510            # body cap (bge-m3 512 minus 2 XLM-R specials)
   min_chunk_chars: 80        # drop leftover slivers after packing
   min_content_chars: 200
+  max_link_density: 0.60     # skip ingest when <a> text / visible text exceeds this
   dedup: true
+  quality:
+    enabled: true
+    min_score: 0.35
+    min_alpha_ratio: 0.28
+    max_punct_run: 0.18
+    min_word_share: 0.22
   sink: "file"
   datastore_config: "config/datastore.yaml"
   download_pdfs: true
