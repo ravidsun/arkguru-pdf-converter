@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import re
-import unicodedata
 
 from common.text import body_without_heading, clean_text
 
@@ -33,9 +32,8 @@ def test_preserves_devanagari_and_diacritics():
     assert "दशा" in out
     assert "।" in out
     assert "Vimśottarī" in out
-    # NFKC composes combining marks; the letter is not dropped.
-    assert "acute" in out
-    assert any(unicodedata.category(ch) == "Mn" or "á" in out or "á" in out for ch in out)
+    # Combining acute on "a" is composed (á), not stripped.
+    assert "á" in out
     assert _INLINE_TAG.search(out) is None
 
 

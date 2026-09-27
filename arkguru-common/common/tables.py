@@ -144,11 +144,12 @@ def split_header_and_body(
     if not rows:
         return [], []
     first = [clean_text(c) for c in rows[0]]
+    rest = [[clean_text(c) for c in r] for r in rows[1:]]
     if first and any(c and not is_placeholder_header(c) for c in first):
         headers = ["" if is_placeholder_header(c) else c for c in first]
-        body = [[clean_text(c) for c in r] for r in rows[1:]]
-        return headers, body
-    return [""] * len(first), [[clean_text(c) for c in r] for r in rows]
+        return headers, rest
+    # ColN-only (or empty) first row is not real header text — drop it.
+    return [""] * len(first), rest
 
 
 def linearize_row(headers: Sequence[str], row: Sequence[str]) -> str:
