@@ -13,6 +13,9 @@ through:
 Fine-tune is **CLI-only** in this package (`cd arkguru-rag-slm && make finetune`).
 The wizard always takes the skip path: combine → index → chat.
 
+YouTube / playlist ingest is not implemented (epic
+[#39](https://github.com/ravidsun/arkguru-pdf-converter/issues/39)).
+
 ## Layout this UI understands
 
 Common, Phase 1, Phase 2, and Phase 3 are regular folders in this repo
