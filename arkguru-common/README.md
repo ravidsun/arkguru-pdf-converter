@@ -1,7 +1,7 @@
 # arkguru-common
 
 Shared, framework-free primitives used by all three phases of the **arkguru**
-local RAG system:
+local RAG system in this monorepo:
 
 - [`arkguru-pdf-extraction`](../arkguru-pdf-extraction) (Phase 1)
 - [`arkguru-web-scraping`](../arkguru-web-scraping) (Phase 2)
@@ -9,7 +9,8 @@ local RAG system:
 
 Each phase folder installs this package as an editable dependency
 (`pip install -e ../arkguru-common`), so the `common` package is importable as a
-top-level module.
+top-level module. The umbrella `scripts/setup_dev_env.sh` installs
+`.[parquet,postgres,test]`.
 
 ## Modules
 
@@ -19,7 +20,7 @@ top-level module.
 | `common.tokenizer` | `count_tokens` / `truncate_to_tokens` (tiktoken `cl100k_base` proxy, with a char-based fallback). |
 | `common.chunking` | `split_sentences` + `pack_windows` — the structure-aware windowing shared by Phase 1 and Phase 2. |
 | `common.datastore` | `ChunkStore` — two-table Postgres + pgvector (`chunks` text + `chunk_embeddings` vectors). Host-agnostic `PG_DSN` (Supabase, Neon, RDS, native local, Docker). `search_chunks()` is the hybrid retrieve (SQL RRF). Upsert does not reset `created_at` on conflict. `iter_missing_embeddings` uses a named server-side cursor. |
-| `common.local_pg` | Detect native (5432) vs Docker (5433) local Postgres and keep an injected remote `PG_DSN`. |
+| `common.local_pg` | Detect native (5432) vs Docker (5433) local Postgres and keep an injected remote `PG_DSN`. CLI: `python -m common.local_pg` (prints `origin=` and `host:port/db` only). |
 | `common.datastore_config` | `open_chunk_store`, `load_datastore_config`, `resolve_dsn` — config-driven datastore factory (no hardcoded DSNs). |
 | `common.worker` | `Worker` (resilient run-loop with signal handling) + `FolderState` (new/changed file tracking). |
 | `common.rrf` | `reciprocal_rank_fusion` — Python fusion for file/npz retrieve. Postgres hybrid is SQL `search_chunks()`. |
@@ -50,4 +51,6 @@ pip install -e ".[test]"
 pytest tests -q
 ```
 
-MIT licensed.
+From the umbrella repo: `python -m pytest arkguru-common/tests -q`.
+
+MIT licensed (`pyproject.toml`).

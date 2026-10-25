@@ -3,10 +3,10 @@
 Combine the Phase 1 (PDF) and Phase 2 (web) chunk datasets, CPU-QLoRA fine-tune a
 small language model, and serve a **fully local** RAG system — no external APIs at
 inference. Target hardware: **Asus NUC · Intel Core Ultra 9 185H · 96 GB RAM ·
-GPU-ready**. Consumes output from
-[`arkguru-pdf-extraction`](https://github.com/ravidsun/arkguru-pdf-extraction)
-and
-[`arkguru-web-scraping`](https://github.com/ravidsun/arkguru-web-scraping).
+GPU-ready**. This folder is Phase 3 of the **arkguru-pdf-converter** monorepo.
+It consumes output from
+[`arkguru-pdf-extraction`](../arkguru-pdf-extraction) and
+[`arkguru-web-scraping`](../arkguru-web-scraping).
 
 ## Quickstart — test on a couple of PDFs (no Postgres, no fine-tuning)
 
@@ -18,7 +18,7 @@ vector store** and answers questions with hybrid retrieval.
 pip install -r requirements.txt
 
 # ---- EASIEST: one command does Phase 1 + ingest (no manual copying) ----
-# Assumes arkguru-pdf-extraction is checked out next to this repo.
+# Phase 1 is the sibling folder in this monorepo (override with --phase1-repo).
 python -m phase3_rag.run_pdfs --pdfs /path/to/your_pdfs --embedder hashing \
     --ask "your question here"
 # add more PDFs anytime with the same command (only new chunks are embedded):
@@ -31,11 +31,12 @@ python -m phase3_rag.run_pdfs --pdfs /path/to/more_pdfs --embedder hashing
 #   ... --embedder sentence_transformer --model domain-slm --chat
 
 # ---- OR the manual two-step (more control) ----
-# 1) Produce chunks from 1–2 PDFs using the Phase 1 repo (arkguru-pdf-extraction),
-#    then copy its data/processed/*.jsonl into this repo's data/processed/.
+# 1) Produce chunks with Phase 1 (per-PDF folders, not a single pdf_chunks.jsonl):
+#    ../arkguru-pdf-extraction/data/processed/<stem>/chunks.jsonl
 
 # 2) Ingest + ask — offline embedder, no model downloads, runs anywhere:
-python -m phase3_rag.quickstart --add data/processed/pdf_chunks.jsonl \
+python -m phase3_rag.quickstart \
+    --add ../arkguru-pdf-extraction/data/processed/sample_handbook/chunks.jsonl \
     --embedder hashing --ask "your question here"
 
 # 3) Add MORE PDFs later — only new chunks are embedded (idempotent by chunk_id):
@@ -43,7 +44,8 @@ python -m phase3_rag.quickstart --add data/processed/new_batch.jsonl \
     --embedder hashing --ask "another question"
 
 # 4) On your NUC: switch to REAL embeddings + a local LLM for generated answers:
-python -m phase3_rag.quickstart --add data/processed/pdf_chunks.jsonl \
+python -m phase3_rag.quickstart \
+    --add ../arkguru-pdf-extraction/data/processed/sample_handbook/chunks.jsonl \
     --embedder sentence_transformer --model-name BAAI/bge-m3 \
     --model domain-slm --chat
 ```
@@ -144,7 +146,7 @@ streamed with a server-side cursor.
 
 **3. Retrieve (`retrieve.py`).** Per query when `PG_DSN` is set: embed in Python
 → one SQL call `search_chunks()` (HNSW + GIN FTS, RRF, `is_parent = false`) →
-**cross-encoder rerank** (`BAAI/bge-reranker-base`) → `top_k_final` → optional
+**cross-encoder rerank** (`BAAI/bge-reranker-v2-m3` in `config.yaml`) → `top_k_final` → optional
 **parent-chunk expansion** (swap a matched child for its larger parent so the LLM
 gets full surrounding context). Connect failures **raise** (fail-closed). File/npz
 mode still fuses with Python `reciprocal_rank_fusion`; JSONL retrieve is only used
@@ -166,39 +168,46 @@ relevancy — over a golden Q&A set (`phase3_rag/golden/golden_qa.jsonl`, seed w
 ## How-to guide
 
 ### Prerequisites
-- Python deps: `pip install -r requirements.txt` (pick and uncomment one CPU
-  fine-tune stack inside the file).
-- **Ollama** installed and running (`https://ollama.com`) for serving/eval.
-- **PostgreSQL + pgvector — optional.** Retrieval works in two modes and picks
-  automatically:
-  - **Database mode** — if a reachable `PG_DSN` is set, retrieval uses
-    Postgres + pgvector (`HybridRetriever`: SQL `search_chunks` RRF of dense +
-    full-text, then reranked).
+- From the umbrella repo, `scripts/setup_dev_env.sh` only installs Phase 3
+  `numpy` + `rank-bm25`. For embeddings, LoRA, RAGAS, or `HybridRetriever`,
+  run `pip install -r requirements.txt` (CPU QLoRA stacks stay commented).
+- **Ollama** installed and running (`https://ollama.com`) for generated answers / eval.
+- **PostgreSQL + pgvector — optional.** Retrieval picks the mode from `PG_DSN`:
+  - **Database mode** — if `PG_DSN` is set, `create_retriever()` uses
+    `HybridRetriever` (SQL `search_chunks`, then rerank). Connect failures **raise**
+    (fail-closed). `HybridRetriever` imports `sentence_transformers`.
     ```bash
-    export PG_DSN=postgresql://user:pass@localhost:5432/rag
+    export PG_DSN=postgresql://rag:change-me@127.0.0.1:5433/rag
     ```
-  - **File mode (no database)** — if Postgres isn't configured/reachable,
-    `create_retriever()` automatically falls back to a `JsonlRetriever` that reads
-    `data/processed/*.jsonl` with in-process BM25 + vector search. Nothing to set
-    up; good for laptops and quick tests.
+  - **File mode** — if **no** DSN is configured, `JsonlRetriever` reads
+    `**/*.jsonl` under `--processed-dir` (default `data/processed`). A set-but-down
+    DSN does **not** fall back.
 
-  See [docs/DATABASE_SETUP.md](docs/DATABASE_SETUP.md) to stand up Postgres.
+  See [docs/DATABASE_SETUP.md](../docs/DATABASE_SETUP.md) (canonical) or the
+  copy in this folder.
 
 ### 1. Bring in the data
-**Option A — files.** Copy the outputs from the other two repos into
-`data/processed/`:
+**Option A — files.** Point at the sibling Phase 1/2 outputs (or copy them):
 ```
-data/processed/*.jsonl            # from arkguru-pdf-extraction (one per PDF)
-data/processed/web_chunks.jsonl   # from arkguru-web-scraping
+../arkguru-pdf-extraction/data/processed/<stem>/chunks.jsonl
+../arkguru-web-scraping/data/processed/web_chunks.jsonl
 ```
+Phase 1 writes **per-PDF folders**, not a single `pdf_chunks.jsonl`.
 **Option B — shared datastore (no copying).** If Phases 1/2 ran with
 `--sink postgres`, the chunks are already in the Postgres + pgvector table; skip
-the copy and go to step 4's datastore path. See *Postgres + pgvector as the
-single datastore* above.
+the copy and go to step 4's datastore path. See *Postgres + pgvector datastore*
+above.
 
 ### 2. Build the training + retrieval datasets
 ```bash
-make combine
+# make combine still passes data/processed/pdf_chunks.jsonl and web_chunks.jsonl
+# (missing files are skipped). Prefer the real Phase 1 folder paths:
+python -m phase3_rag.prepare_dataset \
+  --inputs ../arkguru-pdf-extraction/data/processed/sample_handbook/chunks.jsonl \
+           ../arkguru-web-scraping/data/processed/web_chunks.jsonl \
+  --out-corpus data/processed/corpus.jsonl \
+  --out-train data/processed/train.jsonl \
+  --mode self_supervised --val-frac 0.1
 # -> data/processed/train.jsonl, val.jsonl, corpus.jsonl
 ```
 
@@ -206,9 +215,9 @@ make combine
 ```bash
 make finetune          # writes artifacts/lora-adapter/
 ```
-Then merge the adapter, convert to GGUF, quantize to `Q4_K_M`, and register with
-Ollama (exact commands in the header of `phase3_rag/serve.py`), producing the
-`domain-slm` model tag.
+`finetune_qlora.py` writes `artifacts/lora-adapter/`. The header of
+`phase3_rag/serve.py` sketches merge → GGUF → `ollama create domain-slm`.
+There is **no** `phase3_rag.merge_and_export` module in this repo.
 
 ### 4. Index for retrieval
 ```bash
@@ -324,15 +333,12 @@ shared Postgres datastore — so you can spread them across machines. Three comm
 topologies:
 
 ### A. Single machine (dev / all-in-one)
-Clone the three repos side by side and run the orchestrator; use file mode (no DB)
-or a local Postgres.
+This monorepo already contains all three phase folders. From `arkguru-rag-slm`:
 ```bash
-git clone https://github.com/ravidsun/arkguru-pdf-extraction.git
-git clone https://github.com/ravidsun/arkguru-web-scraping.git
-git clone https://github.com/ravidsun/arkguru-rag-slm.git && cd arkguru-rag-slm
+cd arkguru-rag-slm
 make e2e                                   # offline: one PDF -> answer
 # or with a local Postgres:
-export PG_DSN=postgresql://rag:pass@localhost:5432/rag
+export PG_DSN=postgresql://rag:change-me@127.0.0.1:5433/rag
 python orchestrator.py --once
 ```
 
@@ -341,14 +347,16 @@ Run ingestion wherever it's convenient (a cloud VM with a fast CPU for OCR) and
 serving on your NUC. Both point `PG_DSN` at **one** Postgres — on a VPS or the NUC
 (see [docs/DATABASE_SETUP.md](docs/DATABASE_SETUP.md)).
 
-Ingestion machine (cloud / other) — `arkguru-pdf-extraction` and/or `arkguru-web-scraping`:
+Ingestion machine (cloud / other) — from the Phase 1 / Phase 2 folders in this repo:
 ```bash
 export PG_DSN="postgresql://rag:pass@db-host:5432/rag?sslmode=require"
+cd arkguru-pdf-extraction
 python -m phase1_pdf.pipeline --init-db        # first time: create tables
 python -m phase1_pdf.worker  --sink postgres --interval 60      # watch + ingest
+cd ../arkguru-web-scraping
 python -m phase2_web.worker  --sink postgres --interval 3600    # scheduled crawl
 ```
-Serving machine (NUC) — `arkguru-rag-slm`:
+Serving machine (NUC) — from `arkguru-rag-slm`:
 ```bash
 export PG_DSN="postgresql://rag:pass@db-host:5432/rag?sslmode=require"
 python -m phase3_rag.worker --interval 60      # embed new chunks as they arrive
@@ -364,11 +372,13 @@ each side just runs its own worker(s) on a schedule (systemd / cron / Docker).
 ### C. Portable files (no shared database)
 Phase 1/2 emit JSONL/Parquet; copy them to the serving machine and use file mode.
 ```bash
-# machine A (ingestion)
-python run_phase1.py --out-dir out/
-scp out/*.jsonl  nuc:~/arkguru-rag-slm/data/processed/
+# machine A (ingestion) — per-PDF folders, not a flat *.jsonl
+cd ../arkguru-pdf-extraction
+python run_phase1.py --out-dir data/processed
+scp -r data/processed/*  nuc:~/arkguru-pdf-converter/arkguru-rag-slm/data/processed/
 # NUC (serving) — file-mode fallback, no DB
-python -m phase3_rag.serve --ask "What does error code E14 mean?"
+cd ~/arkguru-pdf-converter/arkguru-rag-slm
+python -m phase3_rag.serve --ask "What does error code E14 mean?" --processed-dir data/processed
 ```
 
 ### Hardware notes
@@ -387,41 +397,38 @@ top_k_final,use_parent_expansion}`, `serve.{backend,model_tag,ctx,faithfulness}`
 
 ### Fine-tuning configuration
 
-**LoRA parameters:**
-- `rank`: 8–32 (default 16); higher rank = more expressive adapter but slower, more memory
-- `alpha`: typically 2x rank (default 32); balances between baseline and adapter weights
-- `target_modules`: which Transformer layers to adapt; typically `["q_proj", "v_proj", "k_proj"]` for attention
+**LoRA parameters** (from `config/config.yaml`):
+- `rank`: 16; `alpha`: 32; `dropout`: 0.05
+- `target_modules`: `["q_proj", "k_proj", "v_proj", "o_proj"]`
 
 **Model selection:**
-- `Qwen2.5-3B-Instruct` *(default)* — balanced, ~12–24h on NUC, strong instruction-following
-- `Mistral-7B-Instruct` — larger, better at long reasoning, ~48–72h on NUC
-- `Phi-3.5-mini` — fastest, ~4–6h, good for quick iteration
+- `Qwen/Qwen2.5-3B-Instruct` *(default in config)* — balanced, ~12–24h on NUC
+- Any other Hugging Face causal LM you set as `base_model` (you must have the weights)
 
-**Dataset balance:**
-- `train_ratio`: 0.8 (80% train, 20% val); more data for fine-tuning than evaluation
-- `max_samples`: cap total pairs; set to 5000 for quick experiments, 10000+ for production
+**Dataset split:**
+- `prepare_dataset --val-frac 0.1` (default). There is no `train_ratio` or `max_samples` key.
 
 **Generation strategy for synthetic QA pairs:**
-- `self_supervised`: Deterministic template pairs, fast, reproducible, no model needed
-  ```
-  Q: "Summarize the key points from: {text}"
-  A: "{summary derived from chunk heading + first sentence}"
-  ```
-- `synthetic_qa`: Drafts Q&A per chunk via local Ollama (`--model` required), slower, more natural
+- `self_supervised`: Deterministic template pairs (`instruction` = section/title, `output` = chunk text). No model needed.
+- `synthetic_qa`: Drafts Q&A per chunk via local Ollama. Slower; failures are logged and skipped.
 
 ### Retrieval configuration
 
-**Hybrid search parameters:**
-- `top_k_vector`: dense hits passed to SQL `search_chunks` as `k_dense` (default **20**)
-- `top_k_bm25`: lexical hits passed as `k_lexical` (default **20**)
+**Hybrid search parameters** (from `config/config.yaml`):
+- `top_k_vector`: dense hits passed to SQL `search_chunks` as `k_dense` (default **60**)
+- `top_k_bm25`: lexical hits passed as `k_lexical` (default **60**)
+- `top_k_candidates`: union size the cross-encoder reranks (default **120**)
 - `top_k_final`: after SQL RRF + Python rerank (default **6**)
+- `rewriter`: `noop` (default) \| `lexicon` \| `ollama`
+- Keep `datastore.yaml` `hnsw_ef_search` (200) ≥ `top_k_vector`
 
 **Ranking:**
-- Postgres: SQL RRF inside `search_chunks()` (`rrf_k=60`), then cross-encoder rerank (`BAAI/bge-reranker-base`)
-- File/npz: Python `reciprocal_rank_fusion`, then the same reranker
+- Postgres: SQL RRF inside `search_chunks()` (`rrf_k=60`), then cross-encoder rerank (`BAAI/bge-reranker-v2-m3`)
+- File/npz (`quickstart` / `run_pdfs`): Python `reciprocal_rank_fusion` in the local store
+- JSONL fallback (`JsonlRetriever`, no `PG_DSN`): in-process BM25 + vectors, then the same reranker
 - There is no `use_cross_encoder_rerank` flag in `config.yaml`
 - `use_parent_expansion`: swap a retrieved child for its parent section when present
-- `serve.faithfulness`: lexical overlap gate on generated answers (`enabled`, `min_token_overlap`, `max_retries`)
+- `serve.faithfulness`: lexical overlap gate (`enabled`, `min_token_overlap`, `min_sentence_tokens`, `max_retries`)
 
 **Example: high-precision vs. high-recall:**
 ```yaml
@@ -440,11 +447,10 @@ retrieval:
 
 ### Serving configuration
 
-- `backend`: `"ollama"` (local) or `"api"` (e.g., OpenAI, Azure)
-- `model_tag`: Ollama model name (e.g., `domain-slm`, `llama2`, `mistral`)
-- `ctx`: context window in tokens (default 2048); set to model's max for better long-context performance
-- `temperature`: 0.3–0.7 for grounded QA; lower = more deterministic
-- `top_p`: nucleus sampling (0.9 default); rarely needs tuning
+- `serve.backend` in YAML is `"ollama"`. `serve.py` always calls Ollama at `http://localhost:11434`; there is no API/OpenAI backend and no `temperature` / `top_p` flags.
+- `model_tag`: Ollama model name (default `domain-slm`)
+- `ctx`: context window in tokens (default **4096**)
+- CLI: `python -m phase3_rag.serve [--config] [--processed-dir] [--ask]`
 
 ### Embedder options
 
@@ -486,8 +492,8 @@ psql $PG_DSN -c "CREATE EXTENSION IF NOT EXISTS vector;"
 ### Answers not grounded
 → increase `top_k_final`, enable `use_parent_expansion`, or improve chunk quality upstream in Phase 1/2. Also check:
 ```bash
-# Inspect what's being retrieved:
-python -m phase3_rag.retrieve "your question here" --verbose
+# Inspect what's being retrieved (no --verbose flag):
+python -m phase3_rag.retrieve "your question here"
 ```
 
 This prints the ranked chunks so you can see if good chunks are even available.
@@ -496,7 +502,7 @@ This prints the ranked chunks so you can see if good chunks are even available.
 → `bge-m3` is large (~1GB); first query downloads the model. Subsequent queries cache it. If timeout happens repeatedly, increase `sentence_transformer` batch size in `index.py` or switch to `hashing` for testing.
 
 ### Fine-tuning crashes with OOM
-→ reduce `lora.rank`, `batch_size`, or `max_samples`. Or enable gradient checkpointing in `finetune_qlora.py`:
+→ reduce `lora.rank` or `train.batch_size` in `config/config.yaml`. Or enable gradient checkpointing in `finetune_qlora.py`:
 ```python
 model.gradient_checkpointing_enable()  # trade compute for memory
 ```
@@ -534,3 +540,13 @@ Fine-tune → `bitsandbytes` 4-bit + `device_map="cuda"`; serving → **vLLM** f
 much higher throughput; embeddings → same libs with `device="cuda"`. Because the
 CPU-specific lines are isolated and commented, migration is config + a few
 uncommented lines, not a rewrite.
+
+## Tests
+
+```bash
+source ../.venv/bin/activate
+make test          # python -m pytest tests -q
+```
+
+Retrieval-only eval (no Ollama): `make eval-retrieval`. RAGAS eval: `make eval`
+(needs the full `requirements.txt` stack + a reachable generator).

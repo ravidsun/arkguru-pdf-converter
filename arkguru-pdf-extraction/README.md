@@ -2,11 +2,11 @@
 
 Turn a folder of PDFs into clean, structured, portable **`Chunk`** records
 (JSONL or Parquet) ready for retrieval and fine-tuning. Runs **local, CPU-only,
-no GPU**. This is Phase 1 of a 3-repo system; its output feeds
-[`arkguru-rag-slm`](https://github.com/ravidsun/arkguru-rag-slm) (Phase 3)
-alongside [`arkguru-web-scraping`](https://github.com/ravidsun/arkguru-web-scraping)
-(Phase 2). All three share one record schema, so their outputs concatenate with
-no glue.
+no GPU**. This folder is Phase 1 of the **arkguru-pdf-converter** monorepo; its
+output feeds [`arkguru-rag-slm`](../arkguru-rag-slm) (Phase 3) alongside
+[`arkguru-web-scraping`](../arkguru-web-scraping) (Phase 2). All three share
+the `Chunk` schema in [`arkguru-common`](../arkguru-common), so their outputs
+concatenate with no glue.
 
 ---
 
@@ -85,16 +85,28 @@ when non-empty). Nested inputs stay nested (`hvac/manual.pdf` →
 ## How-to guide
 
 ### 1. Install
+From the umbrella repo (preferred):
+
 ```bash
-git clone https://github.com/ravidsun/arkguru-pdf-extraction.git
+cd arkguru-pdf-converter          # this monorepo
+bash scripts/setup_dev_env.sh
+source .venv/bin/activate
 cd arkguru-pdf-extraction
-python -m venv .venv && source .venv/bin/activate     # optional
-pip install -r requirements.txt
 ```
-The default backend needs only `pymupdf4llm`, `tiktoken`, `pyyaml`. Scanned-PDF
-OCR is on by default: `pip install -r requirements.txt` pulls `ocrmypdf`,
-`pytesseract`, and `Pillow`. You still need system **Tesseract** and
-**Ghostscript**. `docling` stays commented (heavier tables/layout backend).
+
+Or only this folder, using the sibling `arkguru-common` package:
+
+```bash
+cd arkguru-pdf-extraction
+pip install -r requirements.txt   # pins `-e ../arkguru-common`
+```
+
+The default backend needs `pymupdf4llm`, `tiktoken`, `pyyaml`. Scanned-PDF
+OCR is on by default: `requirements.txt` pulls `ocrmypdf`, `pytesseract`, and
+`Pillow`. You still need system **Tesseract** and **Ghostscript**. `docling`
+and `psycopg` / `pgvector` stay commented (heavier tables backend / optional
+`--sink postgres`). The umbrella `setup_dev_env.sh` installs the Postgres extra
+and, on Debian/Ubuntu, the OCR system packages.
 
 ### 2. Try it on the built-in sample
 ```bash
@@ -126,11 +138,19 @@ Zip the books, attach the zip to the agent chat, and ask it to unpack there.
 See [`docs/CLOUD_RUN.md`](../docs/CLOUD_RUN.md) section **Bring your PDFs**.
 Do not commit PDFs; `data/raw_pdfs/*` is gitignored.
 
-`run_phase1.py` is an equivalent convenience runner with pre-flight checks
-(verifies the input folder exists and lists the PDFs found) and a run summary;
-it accepts the same flags:
+`run_phase1.py` is a convenience runner with pre-flight checks (verifies the
+input folder exists and lists the PDFs found) and a run summary. It accepts the
+same flags as the pipeline **except** `--workers` and `--datastore-config`:
 ```bash
 python run_phase1.py --backend docling --strategy parent_child --no-figures
+```
+
+Worker (watch the input folder; only new/changed PDFs):
+
+```bash
+python -m phase1_pdf.worker --once
+python -m phase1_pdf.worker --interval 30 --sink postgres
+# make worker
 ```
 
 ### 4. Configure (`config/config.yaml`)
@@ -184,12 +204,15 @@ local machine.
 
 ## Layout
 ```
-common/        shared Chunk schema, tokenizer, chunking helpers (vendored)
-phase1_pdf/    extract.py · chunk.py · pipeline.py
-config/        config.yaml
+phase1_pdf/    extract.py · chunk.py · pipeline.py · worker.py
+config/        config.yaml · datastore.yaml
 scripts/       make_sample_pdf.py (offline test fixture)
+tests/         pytest (run with python -m pytest tests -q)
 data/          raw_pdfs/ (input) · interim/ (OCR) · processed/{stem}/chunks.jsonl
 ```
+
+Shared code is the sibling package [`arkguru-common`](../arkguru-common)
+(`pip install -e ../arkguru-common`), not a vendored `common/` tree.
 
 ## Scaling & datastore
 
@@ -312,11 +335,21 @@ OCR is the slowest step. For production corpora with many scanned PDFs, consider
 - A GPU-capable server for OCR batching
 - Pre-processing PDFs to remove unnecessary pages
 
+## Tests
+
+`make test` in this folder runs **`../arkguru-common/tests` only**. For Phase 1
+itself:
+
+```bash
+source ../.venv/bin/activate
+python -m pytest tests -q
+```
+
 ## Advanced: Custom extraction backend
 
 Extend `phase1_pdf/extract.py` with a new backend by:
-1. Implementing `def extract_blocks(pdf_path: str) -> list[Block]`
-2. Registering it in the `BACKENDS` dict
+1. Implementing a function that returns a `Document` of `Block`s (see `_extract_pymupdf`)
+2. Registering it in the `_BACKENDS` dict
 3. Passing `--backend your_name` at runtime
 
 The `Block` schema (text, page, block_type, heading) is the only contract; the extraction engine is pluggable.
